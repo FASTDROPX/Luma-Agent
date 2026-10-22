@@ -14,6 +14,7 @@ import android.content.Intent
 import dev.luma.agent.core.RunState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
+import dev.luma.agent.core.formatElapsed
 import kotlin.math.abs
 
 internal class FloatingPanel(private val service: AgentAccessibilityService, private val graph: AppGraph) {
@@ -24,24 +25,39 @@ internal class FloatingPanel(private val service: AgentAccessibilityService, pri
     private var hidden = false
     private var current = RunState()
     private var enabled = true
+    private var header: TextView? = null
     private val params = WindowManager.LayoutParams(-2, -2, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, android.graphics.PixelFormat.TRANSLUCENT).apply {
-        gravity = Gravity.TOP or Gravity.START; x = dp(16); y = dp(100)
+        // Same row and height as the Stop button on the right (AgentVisualOverlay).
+        gravity = Gravity.TOP or Gravity.START; x = dp(12); y = dp(56)
     }
-    fun bind() { scope.launch { combine(graph.agent.state, graph.vault.state) { run, settings -> run to settings.panel }.collect { (run, panel) -> current = run; enabled = panel; if (run.approval != null || run.retryPending) expanded = true; render() } } }
+    fun bind() {
+        scope.launch { combine(graph.agent.state, graph.vault.state) { run, settings -> run to settings.panel }.collect { (run, panel) -> current = run; enabled = panel; if (run.approval != null || run.retryPending) expanded = true; render() } }
+        // The expanded header shows the run time; refresh it without rebuilding the window.
+        scope.launch { while (true) { delay(1000); if (expanded) header?.text = headerText() } }
+    }
+    private fun headerText(): String {
+        val time = if (current.startedAt > 0) " · " + formatElapsed(android.os.SystemClock.elapsedRealtime() - current.startedAt) else ""
+        return if (current.paused) "Luma · пауза$time" else "Luma · шаг ${current.step}$time"
+    }
     fun temporarilyHide(value: Boolean) { hidden = value; view?.visibility = if (value) View.INVISIBLE else View.VISIBLE }
     private fun render() {
         if (!current.active || !enabled) { remove(); expanded = false; return }
         val root = LinearLayout(service).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(8), dp(10), dp(8)); elevation = dp(8).toFloat()
-            background = shape(0xff232938.toInt(), 28); contentDescription = "Luma: ${current.stage}"
+            orientation = LinearLayout.VERTICAL; elevation = dp(8).toFloat()
+            if (expanded) setPadding(dp(10), dp(6), dp(10), dp(8))
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xff273653.toInt(), 0xff393053.toInt())).apply {
+                cornerRadius = dp(24).toFloat(); setStroke(dp(1), 0x999fbfff.toInt())
+            }
+            contentDescription = "Luma: ${current.stage}"
         }
         val header = TextView(service).apply {
-            text = if (!expanded) "✦" else if (current.paused) "Luma · пауза" else "Luma · шаг ${current.step}"
-            textSize = if (expanded) 15f else 24f; setTextColor(0xffb9c5ff.toInt()); gravity = Gravity.CENTER
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD); minHeight = dp(40); minWidth = dp(36)
+            text = if (!expanded) "✦" else headerText()
+            textSize = if (expanded) 15f else 20f; setTextColor(0xffd9defa.toInt()); gravity = Gravity.CENTER
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD); minHeight = dp(48); minWidth = dp(48)
         }
-        root.addView(header)
+        this.header = header
+        root.addView(header, LinearLayout.LayoutParams(if (expanded) -1 else dp(48), dp(if (expanded) 40 else 48)))
         header.setOnClickListener { expanded = !expanded; render() }
         var startX = 0f; var startY = 0f; var originalX = 0; var originalY = 0; var dragged = false
         header.setOnTouchListener { target, event ->
@@ -60,8 +76,8 @@ internal class FloatingPanel(private val service: AgentAccessibilityService, pri
             }
         }
         if (expanded) {
-            root.addView(TextView(service).apply { text = current.approval?.title ?: current.stage; textSize = 14f; setTextColor(0xffe7eaf3.toInt()); setPadding(dp(8), dp(8), dp(8), dp(12)); maxLines = 4 }, LinearLayout.LayoutParams(dp(250), -2))
-            current.approval?.let { approval -> root.addView(TextView(service).apply { text = approval.details; textSize = 12f; setTextColor(0xffc3c8d7.toInt()); maxLines = 7; setPadding(dp(8), 0, dp(8), dp(8)) }, LinearLayout.LayoutParams(dp(250), -2)) }
+            root.addView(TextView(service).apply { text = current.approval?.title ?: current.stage; textSize = 14f; setTextColor(0xffe7eaf3.toInt()); setPadding(dp(8), dp(8), dp(8), dp(12)); maxLines = 4; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(dp(250), -2))
+            current.approval?.let { approval -> root.addView(TextView(service).apply { text = approval.details; textSize = 12f; setTextColor(0xffc3c8d7.toInt()); maxLines = 7; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(dp(8), 0, dp(8), dp(8)) }, LinearLayout.LayoutParams(dp(250), -2)) }
             val actions = LinearLayout(service)
             if (current.approval != null) actions.addView(button("Разрешить", true) { graph.agent.decide(true) }, LinearLayout.LayoutParams(0, -2, 1f))
             else if(current.retryPending) actions.addView(button("Повторить",true) {graph.agent.retryRequest()},LinearLayout.LayoutParams(0,-2,1f))
@@ -71,7 +87,7 @@ internal class FloatingPanel(private val service: AgentAccessibilityService, pri
         }
         root.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
         remove(); view = root
-        params.width = if (expanded) dp(280) else dp(60); params.height = -2
+        params.width = if (expanded) dp(280) else dp(48); params.height = -2
         params.x = params.x.coerceIn(0, (service.resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0))
         runCatching { manager.addView(root, params) }.onFailure { view = null }
     }

@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "conversations.db").path, null, 2) {
+class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "conversations.db").path, null, 3) {
     val attachments=AttachmentStore(context)
     private val mutableConversations = MutableStateFlow<List<Conversation>>(emptyList())
     private val mutableMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
@@ -19,10 +19,13 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE conversations(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,updated INTEGER NOT NULL)")
-        db.execSQL("CREATE TABLE messages(id INTEGER PRIMARY KEY AUTOINCREMENT,chat INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,role TEXT NOT NULL,body TEXT NOT NULL,created INTEGER NOT NULL,attachments TEXT NOT NULL DEFAULT '[]')")
+        db.execSQL("CREATE TABLE messages(id INTEGER PRIMARY KEY AUTOINCREMENT,chat INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,role TEXT NOT NULL,body TEXT NOT NULL,created INTEGER NOT NULL,attachments TEXT NOT NULL DEFAULT '[]',reasoning TEXT NOT NULL DEFAULT '',meta TEXT NOT NULL DEFAULT '')")
         db.execSQL("CREATE INDEX messages_chat ON messages(chat,id)")
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {if(oldVersion<2) db.execSQL("ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'")}
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if(oldVersion<2) db.execSQL("ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'")
+        if(oldVersion<3) {db.execSQL("ALTER TABLE messages ADD COLUMN reasoning TEXT NOT NULL DEFAULT ''");db.execSQL("ALTER TABLE messages ADD COLUMN meta TEXT NOT NULL DEFAULT ''")}
+    }
     suspend fun init() = withContext(Dispatchers.IO) { refresh() }
     suspend fun select(id: Long?) = withContext(Dispatchers.IO) { mutableSelected.value = id; reloadMessages() }
     suspend fun ensure(title: String): Long = withContext(Dispatchers.IO) {
@@ -30,12 +33,13 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
             put("title", title.trim().take(60)); put("updated", System.currentTimeMillis())
         }).also { mutableSelected.value = it; refresh(); reloadMessages() }
     }
-    suspend fun append(chat: Long, role: String, body: String,files: List<Attachment> = emptyList()) = withContext(Dispatchers.IO) {
+    /** [reasoning] and [stats] are shown with the answer only; they are never sent back to the model. */
+    suspend fun append(chat: Long, role: String, body: String,files: List<Attachment> = emptyList(),reasoning: String = "",stats: TokenStats? = null) = withContext(Dispatchers.IO) {
         if(files.size>4 || files.sumOf {it.size}>16_000_000) throw UserError("Не больше 4 вложений и 16 МБ в одном сообщении.")
         val now = System.currentTimeMillis()
         writableDatabase.beginTransaction()
         try {
-            writableDatabase.insertOrThrow("messages", null, ContentValues().apply { put("chat", chat); put("role", role); put("body", body.take(100_000)); put("created", now);put("attachments",Attachment.encode(files)) })
+            writableDatabase.insertOrThrow("messages", null, ContentValues().apply { put("chat", chat); put("role", role); put("body", body.take(100_000)); put("created", now);put("attachments",Attachment.encode(files));put("reasoning",reasoning.take(100_000));put("meta",stats?.json()?.toString().orEmpty()) })
             writableDatabase.update("conversations", ContentValues().apply { put("updated", now) }, "id=?", arrayOf(chat.toString()))
             writableDatabase.setTransactionSuccessful()
         } finally { writableDatabase.endTransaction() }
@@ -73,7 +77,7 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
     private fun reloadMessages() {
         val id = mutableSelected.value ?: run { mutableMessages.value = emptyList(); return }
         val result = mutableListOf<ChatMessage>()
-        readableDatabase.rawQuery("SELECT id,role,body,created,attachments FROM messages WHERE chat=? ORDER BY id DESC LIMIT 200", arrayOf(id.toString())).use { c -> while (c.moveToNext()) result += ChatMessage(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3),Attachment.decode(c.getString(4))) }
+        readableDatabase.rawQuery("SELECT id,role,body,created,attachments,reasoning,meta FROM messages WHERE chat=? ORDER BY id DESC LIMIT 200", arrayOf(id.toString())).use { c -> while (c.moveToNext()) result += ChatMessage(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3),Attachment.decode(c.getString(4)),c.getString(5),TokenStats.parse(c.getString(6))) }
         mutableMessages.value = result.reversed()
     }
 }

@@ -382,6 +382,12 @@ class UiTest {
         assertTrue((orb.left+orb.right)/2f<70.dp)
         assertEquals(44.dp,orb.right-orb.left)
         contained("chat-input","chat-composer")
+        compose.onNodeWithTag("markdown-table").assertExists()
+        compose.onNodeWithTag("token-meter").assertExists()
+        // Attach, field and send sit on one line: their vertical centres agree within 2 dp.
+        val attach=compose.onNodeWithTag("chat-attach").getUnclippedBoundsInRoot()
+        val field=compose.onNodeWithTag("chat-input").getUnclippedBoundsInRoot()
+        assertTrue(kotlin.math.abs(((attach.top+attach.bottom)/2f-(field.top+field.bottom)/2f).value)<2f)
         screenshot("31-chat-markdown")
     }
     @Test fun scrollingEnablesMotionBlurAndRestingFrameBecomesSharpAgain() {
@@ -399,7 +405,7 @@ class UiTest {
         assertEquals(0f,stopped,.001f)
         compose.mainClock.autoAdvance=true
     }
-    @Test fun singleOrbFliesFromWelcomeToReplyAndFollowsItsRevealedLines() {
+    @Test fun singleOrbFliesFromWelcomeToReplyAndRestsAtItsLastLine() {
         runBlocking {graph.vault.update {it.copy(onboarded=true,reducedMotion=false)}}
         compose.mainClock.autoAdvance=false
         compose.setContent {AppRoot(graph)}
@@ -412,20 +418,25 @@ class UiTest {
         val left=compose.onNodeWithTag("chat-follow-orb").getUnclippedBoundsInRoot()
         assertTrue((left.left+left.right)/2f<70.dp)
         assertEquals(44.dp,left.right-left.left)
-        runBlocking {graph.chats.append(id,"assistant","# Начало ответа\n\n"+(1..25).joinToString("\n\n") {"Строка $it. Мягкое появление текста."})}
+        runBlocking {graph.chats.append(id,"assistant","# Начало ответа\n\nПервая строка.\n\nПоследняя строка ответа.",reasoning="Сначала подумаю, потом отвечу.",stats=TokenStats(3200,120,4000,10000,6000))}
         compose.runOnUiThread {graph.chatBusy.value=false}
         compose.mainClock.advanceTimeByFrame();compose.waitForIdle()
-        compose.waitUntil(5000) {nativeMarkdown().any {it.text.toString().contains("Начало ответа")}}
-        val liveView=nativeMarkdown().first()
-        compose.runOnUiThread {liveView.apply {dispose();setReveal(.04f)}}
-        compose.mainClock.advanceTimeByFrame();compose.waitForIdle();compose.mainClock.advanceTimeBy(700);compose.waitForIdle()
-        val top=compose.onNodeWithTag("chat-follow-orb").getUnclippedBoundsInRoot().top
-        compose.runOnUiThread {liveView.setReveal(.16f)}
-        compose.mainClock.advanceTimeByFrame();compose.waitForIdle();compose.mainClock.advanceTimeBy(700);compose.waitForIdle()
-        val lower=compose.onNodeWithTag("chat-follow-orb").getUnclippedBoundsInRoot().top
-        assertTrue("Orb did not follow new lines: $top -> $lower",lower>top+20.dp)
-        screenshot("32-reply-following")
-        compose.runOnUiThread {liveView.setReveal(1f)}
+        compose.waitUntil(5000) {nativeMarkdown().any {it.text.toString().contains("Последняя строка ответа")}}
+        compose.mainClock.advanceTimeBy(1200);compose.waitForIdle()
+        val replyId=graph.chats.messages.value.last().id
+        val reply=compose.onNodeWithTag("reply-$replyId").getUnclippedBoundsInRoot()
+        val orb=compose.onNodeWithTag("chat-follow-orb").getUnclippedBoundsInRoot()
+        val orbCentre=(orb.top+orb.bottom)/2f
+        // The answer arrives whole; the orb rests beside its last line instead of chasing a reveal.
+        assertTrue("Orb $orbCentre is not at the end of the reply ${reply.top}..${reply.bottom}",orbCentre>(reply.top+reply.bottom)/2f && orbCentre<reply.bottom+24.dp)
+        compose.onNodeWithTag("thinking-block").assertExists()
+        compose.onNodeWithText("Рассуждения · 2,0 с").assertExists()
+        compose.onNodeWithTag("copy-$replyId").assertExists()
+        compose.onNodeWithText("Сначала подумаю, потом отвечу.").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Показать рассуждения").performClick()
+        compose.mainClock.advanceTimeBy(600);compose.waitForIdle()
+        compose.onNodeWithText("Сначала подумаю, потом отвечу.").assertExists()
+        screenshot("32-reply-whole-with-thinking")
         compose.mainClock.autoAdvance=true
     }
 

@@ -25,6 +25,8 @@ class AppGraph(val context: Context) {
     private val mutableCatalog = MutableStateFlow(CatalogState())
     val catalog = mutableCatalog.asStateFlow()
     val chatBusy = MutableStateFlow(false)
+    /** SystemClock.elapsedRealtime() when the current chat request started; 0 when idle. */
+    val chatStartedAt = MutableStateFlow(0L)
     val uiMessage = MutableStateFlow<String?>(null)
     val overlayVisible=MutableStateFlow(false)
     internal var orbAnchor: OrbAnchor?=null
@@ -61,7 +63,7 @@ class AppGraph(val context: Context) {
         val settings = vault.state.value; val connection = settings.connection()
         if (connection.model.isBlank()) { uiMessage.value = "Сначала подключите провайдера и выберите модель."; return false }
         if(asAgent) pendingHandoff=orbAnchor?.let {OrbHandoff(it.x,it.y,it.radius,it.seeds())}
-        chatBusy.value = true
+        chatBusy.value = true; chatStartedAt.value = android.os.SystemClock.elapsedRealtime()
         val revision = ++chatRevision
         chatJob = scope.launch {
             var chatId: Long? = null
@@ -73,13 +75,13 @@ class AppGraph(val context: Context) {
                     context.startForegroundService(Intent(context, AgentTaskService::class.java).putExtra("chat", id).putExtra("goal", clean).putExtra("request", token))
                     withTimeout(5000) { agent.state.first { it.active && it.chatId == id } }
                 } else {
-                    val answer = api.generate(settings.provider, connection, chats.history(id, connection.generation().contextTurns).dropWhile { it.role != "user" },ModelPrompts.chat(connection))
-                    chats.append(id, "assistant", answer)
+                    val answer = api.generateDetailed(settings.provider, connection, chats.history(id, connection.generation().contextTurns).dropWhile { it.role != "user" },ModelPrompts.chat(connection))
+                    chats.append(id, "assistant", answer.text, reasoning = answer.reasoning, stats = answer.stats)
                 }
             } catch (e: CancellationException) { }
             // The error belongs to the chat that sent the message, even if the user has opened another one.
             catch (e: Exception) { uiMessage.value = safeError(e); chatId?.let { runCatching { chats.append(it, "assistant", safeError(e)) } } }
-            finally { if (revision == chatRevision) { pendingAgentRequest = null; chatBusy.value = false } }
+            finally { if (revision == chatRevision) { pendingAgentRequest = null; chatBusy.value = false; chatStartedAt.value = 0L } }
         }
         return true
     }
@@ -87,5 +89,5 @@ class AppGraph(val context: Context) {
         if (token == null || pendingAgentRequest != token) return false
         pendingAgentRequest = null; return true
     }
-    fun cancelChat() { chatRevision++; pendingAgentRequest = null; chatJob?.cancel(); chatBusy.value = false }
+    fun cancelChat() { chatRevision++; pendingAgentRequest = null; chatJob?.cancel(); chatBusy.value = false; chatStartedAt.value = 0L }
 }

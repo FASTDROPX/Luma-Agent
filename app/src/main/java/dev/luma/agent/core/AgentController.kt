@@ -32,7 +32,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
         if (job?.isActive == true) return
         val settings = vault.state.value; val connection = settings.connection()
         stoppedMessage = "Задача остановлена."
-        mutable.value = RunState(active = true, stage = "Подготавливаю задачу", chatId = chat)
+        mutable.value = RunState(active = true, stage = "Подготавливаю задачу", chatId = chat, startedAt = android.os.SystemClock.elapsedRealtime())
         job = scope.launch {
             try {
                 withTimeout(if (settings.unlimitedAgent) Long.MAX_VALUE else settings.taskMinutes.coerceIn(2,15) * 60_000L) {
@@ -42,10 +42,11 @@ class AgentController(private val context: Context, private val scope: Coroutine
                     var step = 0
                     while (settings.unlimitedAgent || step < settings.maxSteps.coerceIn(5,30)) {
                         awaitRunning(); step = (step + 1).coerceAtLeast(1); update("Обдумываю следующий шаг", step)
-                        val raw = generateRecovering(settings,connection,memory.turns(vault.state.value.screenshots),step)
+                        val generation = generateRecovering(settings,connection,memory.turns(vault.state.value.screenshots),step)
+                        val raw = generation.text
                         awaitRunning()
                         when (val reply = AgentProtocol.parse(raw)) {
-                            is AgentReply.Final -> { chats.append(chat, "assistant", reply.text); update("Готово", step); return@withTimeout }
+                            is AgentReply.Final -> { chats.append(chat, "assistant", reply.text, reasoning = generation.reasoning, stats = generation.stats); update("Готово", step); return@withTimeout }
                             is AgentReply.Tool -> {
                                 val label = describe(reply)
                                 update(label, step)
@@ -96,12 +97,12 @@ class AgentController(private val context: Context, private val scope: Coroutine
     fun togglePause() { if (mutable.value.active) mutable.value = mutable.value.copy(paused = !mutable.value.paused) }
     fun decide(accepted: Boolean) { approval?.complete(accepted) }
     fun retryRequest() {retry?.complete(Unit)}
-    private suspend fun generateRecovering(settings: AppSettings,connection: Connection,turns: List<Turn>,step: Int): String {
+    private suspend fun generateRecovering(settings: AppSettings,connection: Connection,turns: List<Turn>,step: Int): Generation {
         while(true) {
             awaitRunning()
             try {
                 val currentTurns = if (vault.state.value.screenshots) turns else turns.map { it.copy(image = null) }
-                return api.generate(settings.provider,connection,currentTurns,
+                return api.generateDetailed(settings.provider,connection,currentTurns,
                     ModelPrompts.agent(vault.state.value,connection,AgentAccessibilityService.connected.value),true) {attempt,wait ->
                     update("Провайдер временно недоступен · повтор $attempt/2 через ${wait/1000} с",step)
                 }

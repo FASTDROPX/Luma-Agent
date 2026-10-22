@@ -17,8 +17,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
@@ -183,19 +186,28 @@ internal class MarkdownView(context: Context): TextView(context) {
 
 @Composable fun MarkdownContent(source: String,modifier: Modifier=Modifier,animate: Boolean=false,
     onCursor: (Float)->Unit={},onGrowth: ()->Unit={}) {
+    // A reply is shown whole. Text runs render through Markwon, GFM tables through MarkdownTable
+    // so each column is as wide as its content. onCursor reports the y of the reply's last line.
+    val segments=remember(source) {splitMarkdownTables(source)}
+    val cursor by rememberUpdatedState(onCursor);val growth by rememberUpdatedState(onGrowth)
+    val lastLine=with(LocalDensity.current) {14.dp.toPx()}
+    androidx.compose.foundation.layout.Column(modifier.onGloballyPositioned {c ->cursor(c.positionInRoot().y+(c.size.height-lastLine).coerceAtLeast(lastLine))}
+        .onSizeChanged {growth()},verticalArrangement=androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
+        for(segment in segments) when(segment) {
+            is MarkdownSegment.Text -> MarkdownText(segment.markdown,Modifier.fillMaxWidth())
+            is MarkdownSegment.Table -> MarkdownTable(segment)
+        }
+    }
+}
+@Composable private fun MarkdownText(source: String,modifier: Modifier) {
     val context=LocalContext.current;val density=LocalDensity.current
     val colors=MaterialTheme.colorScheme;val ink=colors.onSurface.toArgb()
     val dark=colors.background.luminance()<.45f
     val size=with(density) {MaterialTheme.typography.bodyLarge.fontSize.toPx()}
     val renderer=remember(context,dark,size) {MarkdownEngine.create(context,dark,size)}
     val parsed by produceState<Spanned?>(null,source,renderer) {value=withContext(Dispatchers.Default) {renderer.toMarkdown(normalizeMath(source))}}
-    val reduced=LocalReducedMotion.current
-    val cursor by rememberUpdatedState(onCursor);val growth by rememberUpdatedState(onGrowth)
-    var top by remember {mutableFloatStateOf(0f)};var local by remember {mutableFloatStateOf(12f)}
-    AndroidView(factory={MarkdownView(it)},modifier=modifier.onGloballyPositioned {coordinates ->top=coordinates.positionInRoot().y;cursor(top+local)},
-        onRelease={it.dispose()},update={view ->
-            view.setTextColor(ink);view.setTextSize(TypedValue.COMPLEX_UNIT_PX,size)
-            view.cursor={y->local=y;cursor(top+y)};view.growth={growth()}
-            parsed?.let {view.display(renderer,it,source,animate && !reduced)}
-        })
+    AndroidView(factory={MarkdownView(it)},modifier=modifier,onRelease={it.dispose()},update={view ->
+        view.setTextColor(ink);view.setTextSize(TypedValue.COMPLEX_UNIT_PX,size)
+        parsed?.let {view.display(renderer,it,source,false)}
+    })
 }

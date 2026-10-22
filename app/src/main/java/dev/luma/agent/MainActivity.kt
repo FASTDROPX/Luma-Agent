@@ -42,6 +42,8 @@ private data class Destination(val title: String, val icon: ImageVector)
     val notice by graph.uiMessage.collectAsStateWithLifecycle()
     val conversations by graph.chats.conversations.collectAsStateWithLifecycle()
     val selectedChat by graph.chats.selected.collectAsStateWithLifecycle()
+    val tokenStats by graph.api.stats.collectAsStateWithLifecycle()
+    val chatBusy by graph.chatBusy.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -61,15 +63,22 @@ private data class Destination(val title: String, val icon: ImageVector)
                     snackbarHost = { SnackbarHost(snackbar) },
                     topBar = { TopAppBar(title = {
                         Column { Text(if (tab == 0) "Luma" else destinations[tab].title, style = MaterialTheme.typography.titleLarge)
-                            if (tab == 0) Text(if (settings.connection().model.isBlank()) "Твой AI-помощник" else "${settings.provider.label} · ${settings.connection().model}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) }
+                            if (tab == 0) OneLine(if (settings.connection().model.isBlank()) "Твой AI-помощник" else "${shortModelName(settings.connection().model)} · ${if (settings.provider == dev.luma.agent.core.Provider.LOCAL) "локально" else settings.provider.label}",
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }, navigationIcon = { LumaBadge(Modifier.padding(start = 16.dp, end = 10.dp).size(36.dp)) }, actions = {
-                        if (tab == 0) { IconButton(onClick = { history = true }) { Icon(Icons.Outlined.History, "История чатов") }; IconButton(onClick = { graph.cancelChat(); scope.launch { graph.chats.select(null) } }) { Icon(Icons.Outlined.Add, "Новый чат") } }
+                        if (tab == 0) Column(Modifier.padding(end = 4.dp), horizontalAlignment = Alignment.End) {
+                            Row {
+                                IconButton(onClick = { history = true }, Modifier.size(42.dp)) { Icon(Icons.Outlined.History, "История чатов") }
+                                IconButton(onClick = { graph.cancelChat(); scope.launch { graph.chats.select(null) } }, Modifier.size(42.dp)) { Icon(Icons.Outlined.Add, "Новый чат") }
+                            }
+                            if (settings.tokenMeter) TokenMeter(tokenStats, chatBusy || run.active)
+                        }
                     }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)) },
-                    bottomBar = { if (!keyboardOpen) NavigationBar(containerColor = androidx.compose.ui.graphics.Color.Transparent, tonalElevation = 0.dp) { destinations.forEachIndexed { i, destination -> NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(destination.icon, destination.title) }, label = { Text(destination.title, maxLines = 1) }) } } }
+                    bottomBar = { if (!keyboardOpen) NavigationBar(containerColor = androidx.compose.ui.graphics.Color.Transparent, tonalElevation = 0.dp) { destinations.forEachIndexed { i, destination -> NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(destination.icon, destination.title) }, label = { Text(destination.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }) } } }
                 ) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding)) {
                         if (run.active && (tab != 0 || selectedChat != run.chatId)) Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth().clickable { tab = 0; scope.launch { graph.chats.select(run.chatId) } }) {
-                            Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text(if (run.approval != null) "Нужно подтверждение" else "Luma выполняет задачу", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge); IconButton(onClick = { graph.agent.stop() }) { Icon(Icons.Outlined.Stop, "Остановить") } }
+                            Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text(if (run.approval != null) "Нужно подтверждение" else "Luma выполняет задачу · ${dev.luma.agent.core.formatElapsed(rememberElapsed(run.startedAt))}", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis); IconButton(onClick = { graph.agent.stop() }) { Icon(Icons.Outlined.Stop, "Остановить") } }
                         }
                         val reduced = LocalReducedMotion.current
                         AnimatedContent(tab, modifier = Modifier.weight(1f), transitionSpec = { (fadeIn(tween(if (reduced) 0 else 300)) + slideInHorizontally(tween(if(reduced) 0 else 360)) { if (reduced) 0 else it / 10 }) togetherWith fadeOut(tween(if (reduced) 0 else 220)) }, label = "screen") { page ->
@@ -80,7 +89,7 @@ private data class Destination(val title: String, val icon: ImageVector)
                 if (history) ModalBottomSheet(onDismissRequest = { history = false }) {
                     Text("Твои чаты", Modifier.padding(horizontal = 24.dp, vertical = 12.dp), style = MaterialTheme.typography.headlineSmall)
                     MotionLazyColumn(Modifier.fillMaxWidth().heightIn(max = 500.dp)) {
-                        items(conversations, key = { it.id }) { chat -> ListItem(headlineContent = { Text(chat.title, maxLines = 2) }, leadingContent = { Icon(Icons.Outlined.ChatBubbleOutline, null) }, trailingContent = { IconButton(onClick = { deleting = chat.id }, enabled = !(run.active && run.chatId == chat.id)) { Icon(Icons.Outlined.DeleteOutline, "Удалить чат") } }, modifier = Modifier.clickable { scope.launch { graph.chats.select(chat.id) }; tab = 0; history = false }) }
+                        items(conversations, key = { it.id }) { chat -> ListItem(headlineContent = { Text(chat.title, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }, supportingContent = { Text(java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale("ru")).format(java.util.Date(chat.updated)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }, leadingContent = { Icon(Icons.Outlined.ChatBubbleOutline, null) }, trailingContent = { IconButton(onClick = { deleting = chat.id }, enabled = !(run.active && run.chatId == chat.id)) { Icon(Icons.Outlined.DeleteOutline, "Удалить чат") } }, modifier = Modifier.clickable { scope.launch { graph.chats.select(chat.id) }; tab = 0; history = false }) }
                         if (conversations.isEmpty()) item { Text("Здесь появятся твои разговоры", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                     Spacer(Modifier.height(24.dp))

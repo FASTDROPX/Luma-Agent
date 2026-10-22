@@ -42,7 +42,7 @@ import kotlin.math.*
     }
     return phase
 }
-@Composable fun GradientActionButton(active: Boolean,enabled: Boolean,tick: Int,click: ()->Unit) {
+@Composable fun GradientActionButton(active: Boolean,enabled: Boolean,tick: Int,click: ()->Unit,diameter: androidx.compose.ui.unit.Dp=52.dp) {
     val speed=remember {Animatable(.4f)}
     val phase=animatedPhase(speed.asState())
     val reduced=LocalReducedMotion.current
@@ -56,7 +56,7 @@ import kotlin.math.*
             }
         } else {flight.snapTo(1f);speed.snapTo(.4f)}
     }
-    Box(Modifier.size(52.dp).graphicsLayer {val pulse=sin(flight.value*PI.toFloat());scaleX=1f-pulse*.08f;scaleY=scaleX}.clip(CircleShape)
+    Box(Modifier.size(diameter).graphicsLayer {val pulse=sin(flight.value*PI.toFloat());scaleX=1f-pulse*.08f;scaleY=scaleX}.clip(CircleShape)
         .semantics {contentDescription=if(active) "Остановить" else "Отправить"}
         .clickable(enabled=enabled || active,role=Role.Button,onClick=click),contentAlignment=Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
@@ -68,10 +68,10 @@ import kotlin.math.*
             drawCircle(Color.White.copy(alpha=.32f),size.minDimension/2,style=androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
         }
         val tint=Color(0xFF2D3550).copy(alpha=if(enabled || active) 1f else .55f)
-        if(flight.value<1f) Icon(Icons.Outlined.ArrowUpward,null,Modifier.size(26.dp).graphicsLayer {translationY=-52.dp.toPx()*flight.value},tint=tint)
-        Box(Modifier.graphicsLayer {translationY=if(flight.value<1f) 52.dp.toPx()*(1f-flight.value) else 0f}) {
+        if(flight.value<1f) Icon(Icons.Outlined.ArrowUpward,null,Modifier.size(22.dp).graphicsLayer {translationY=-diameter.toPx()*flight.value},tint=tint)
+        Box(Modifier.graphicsLayer {translationY=if(flight.value<1f) diameter.toPx()*(1f-flight.value) else 0f}) {
             Crossfade(active,animationSpec=tween(if(reduced) 0 else 180),label="send to stop") {stop ->
-                Icon(if(stop) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward,null,Modifier.size(26.dp),tint=tint)
+                Icon(if(stop) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward,null,Modifier.size(22.dp),tint=tint)
             }
         }
     }

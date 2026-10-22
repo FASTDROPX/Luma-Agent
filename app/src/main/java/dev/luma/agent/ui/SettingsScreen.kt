@@ -44,7 +44,7 @@ import kotlin.math.roundToInt
         }
         when(visiblePage) {
             "" -> {
-                item { SettingsLink("Оформление","Тема, палитра и чёрный фон",Icons.Outlined.Palette) {page="theme"} }
+                item { SettingsLink("Оформление","Тема, палитра и скорость генерации",Icons.Outlined.Palette) {page="theme"} }
                 item { SettingsLink("Эффекты","Motion blur, частицы и плавный ввод",Icons.Outlined.AutoAwesome) {page="effects"} }
                 item { SettingsLink("Параметры модели",if(model.isBlank()) "Сначала подключи модель" else "${provider.label} · $model",Icons.Outlined.Tune) {page="model"} }
                 item { SettingsLink("Управление","Курсор, подтверждения и лимиты",Icons.Outlined.TouchApp) {page="agent"} }
@@ -62,6 +62,10 @@ import kotlin.math.roundToInt
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) {listOf("system" to "Авто","light" to "Светлая","dark" to "Тёмная").forEach {(id,label)->FilterChip(settings.theme==id,{graph.update {it.copy(theme=id)}},label={Text(label)})}}
                     SettingToggle("Цвета обоев","Палитра Android 12 и новее",settings.dynamicColors) {v->graph.update {it.copy(dynamicColors=v)}}
                     SettingToggle("Чёрный фон","В тёмной теме",visuals.blackBackground) {v->visual {it.copy(blackBackground=v)}}
+                } }
+                item { SoftCard {
+                    Text("Чат",style=MaterialTheme.typography.titleMedium)
+                    SettingToggle("Скорость генерации","Токены в секунду на вход и выход: в шапке чата, в карточке агента и на кнопке «Стоп»",settings.tokenMeter) {v->graph.update {it.copy(tokenMeter=v)}}
                 } }
                 item { SoftCard {
                     Text("Палитра Luma",style=MaterialTheme.typography.titleMedium)

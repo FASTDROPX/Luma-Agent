@@ -50,14 +50,32 @@ internal class AgentVisualOverlay(private val service: AgentAccessibilityService
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,PixelFormat.TRANSLUCENT).apply {
         gravity=Gravity.TOP or Gravity.END;x=dp(12);y=dp(56)
     }
-    fun bind() {scope.launch {combine(controller.state,graph.vault.state) {run,s->run to s}.collect {(run,s)->
-        current=run;settings=s
-        if(!run.active) remove() else {
-            if(canvas==null && stopButton==null) show()
-            canvas?.configure(run,s)
-            stopButton?.text=if(run.paused) "■ Стоп · пауза" else "■ Стоп"
+    fun bind() {
+        scope.launch {combine(controller.state,graph.vault.state) {run,s->run to s}.collect {(run,s)->
+            current=run;settings=s
+            if(!run.active) remove() else {
+                if(canvas==null && stopButton==null) show()
+                canvas?.configure(run,s)
+                stopButton?.text=stopLabel()
+            }
+        }}
+        // Run time and token speed tick on the Stop button while the task is active.
+        scope.launch {while(true) {delay(1000);if(current.active) stopButton?.text=stopLabel()}}
+    }
+    /** "■ Стоп" and, smaller below it, "1:05 · ↑ 812 ↓ 38 т/с". */
+    internal fun stopLabel(): CharSequence {
+        val title=if(current.paused) "■ Стоп · пауза" else "■ Стоп"
+        val time=if(current.startedAt>0) dev.luma.agent.core.formatElapsed(SystemClock.elapsedRealtime()-current.startedAt) else ""
+        val stats=graph.api.stats.value?.takeIf {settings.tokenMeter}
+        val meter=stats?.let {"↑ ${dev.luma.agent.core.formatRate(it.inputPerSecond)} ↓ ${dev.luma.agent.core.formatRate(it.outputPerSecond)} т/с"}.orEmpty()
+        val detail=listOf(time,meter).filter {it.isNotEmpty()}.joinToString(" · ")
+        return android.text.SpannableStringBuilder(title).apply {
+            if(detail.isEmpty()) return@apply
+            append("\n");val start=length;append(detail)
+            setSpan(android.text.style.RelativeSizeSpan(.74f),start,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(android.text.style.ForegroundColorSpan(0xc0d9defa.toInt()),start,length,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
-    }}}
+    }
     private fun show() {
         val layer=AgentCanvas(service)
         layer.setOrigin(graph.takeOrbHandoff())
@@ -69,8 +87,9 @@ internal class AgentVisualOverlay(private val service: AgentAccessibilityService
         runCatching {manager.addView(layer,params);canvas=layer}
         graph.overlayVisible.value=canvas!=null
         val stop=Button(service).apply {
-            text="■ Стоп";isAllCaps=false;textSize=14f;contentDescription="Остановить управление Luma"
-            minHeight=dp(48);minimumHeight=dp(48);setPadding(dp(18),dp(8),dp(18),dp(8))
+            text=stopLabel();isAllCaps=false;textSize=14f;contentDescription="Остановить управление Luma"
+            gravity=Gravity.CENTER;setLineSpacing(0f,.92f);stateListAnimator=null
+            minHeight=dp(48);minimumHeight=dp(48);minWidth=dp(96);minimumWidth=dp(96);setPadding(dp(18),dp(6),dp(18),dp(6))
             setTextColor(0xffe9e8ff.toInt());backgroundTintList=null
             background=GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,intArrayOf(0xff273653.toInt(),0xff393053.toInt())).apply {
                 cornerRadius=dp(24).toFloat();setStroke(dp(1),0x999fbfff.toInt())

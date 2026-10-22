@@ -211,7 +211,7 @@ import dev.luma.agent.core.*
             val filtered = remember(search, models) { models.filter { it.id.contains(search, true) || it.name.contains(search, true) } }
             MotionLazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
                 items(filtered, key = { it.id }) { model ->
-                    ListItem(headlineContent = { Text(model.name) }, supportingContent = { Text(model.id, maxLines = 2) }, trailingContent = { if (model.id == selected) Icon(Icons.Outlined.CheckCircle, "Выбрано", tint = MaterialTheme.colorScheme.primary) else if (model.vision) Icon(Icons.Outlined.Image, "Изображения", tint = MaterialTheme.colorScheme.onSurfaceVariant) }, modifier = Modifier.clickable { onSelect(model.id) })
+                    ListItem(headlineContent = { Text(model.name) }, supportingContent = { Text(model.id, maxLines = 2, overflow = TextOverflow.Ellipsis) }, trailingContent = { if (model.id == selected) Icon(Icons.Outlined.CheckCircle, "Выбрано", tint = MaterialTheme.colorScheme.primary) else if (model.vision) Icon(Icons.Outlined.Image, "Изображения", tint = MaterialTheme.colorScheme.onSurfaceVariant) }, modifier = Modifier.clickable { onSelect(model.id) })
                 }
                 if (filtered.isEmpty()) item { Text("Ничего не найдено", Modifier.padding(20.dp)) }
             }

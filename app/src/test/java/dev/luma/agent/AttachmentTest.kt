@@ -51,6 +51,17 @@ class AttachmentTest {
             chats.delete(id);assertFalse(chats.attachments.file(file).exists())
         } finally {chats.close()}
     }
+    @Test fun reasoningAndSpeedAreKeptForTheChatButNeverSentBack()=runBlocking {
+        val chats=ChatStore(context)
+        try {
+            val id=chats.ensure("think");chats.append(id,"user","q")
+            chats.append(id,"assistant","ответ",reasoning="мысли",stats=TokenStats(10,20,100,1100,400))
+            val shown=chats.messages.value.last()
+            assertEquals("мысли",shown.reasoning);assertEquals(20,shown.stats!!.outputTokens);assertEquals(300,shown.stats!!.thinkingMs)
+            assertEquals(listOf("q","ответ"),chats.history(id).map {it.text})
+            assertFalse(chats.history(id).joinToString {it.text}.contains("мысли"))
+        } finally {chats.close()}
+    }
     @Test fun historyLimitReadsOnlyTheNewestMessages()=runBlocking {
         val chats=ChatStore(context)
         try {
@@ -96,7 +107,7 @@ class AttachmentTest {
             db.execSQL("INSERT INTO conversations VALUES(1,'old',1)");db.execSQL("INSERT INTO messages VALUES(1,1,'user','Старая история',1)");db.version=1
         }
         val chats=ChatStore(context)
-        try {chats.select(1);assertEquals("Старая история",chats.messages.value.single().text);assertTrue(chats.messages.value.single().attachments.isEmpty());assertEquals(2,chats.readableDatabase.version)}
+        try {chats.select(1);assertEquals("Старая история",chats.messages.value.single().text);assertTrue(chats.messages.value.single().attachments.isEmpty());assertEquals("",chats.messages.value.single().reasoning);assertEquals(3,chats.readableDatabase.version)}
         finally {chats.close()}
     }
     @Test fun systemPickerUriIsCopiedWithoutRetainingExternalAccess()=runBlocking {

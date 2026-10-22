@@ -1,11 +1,9 @@
 package dev.luma.agent.core
 
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
@@ -25,7 +23,8 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /** [local]: a model on the user's own hardware may think for minutes before the first byte. */
-internal data class WireRequest(val url: String, val headers: Map<String, String>, val body: JSONObject? = null, val catalog: Boolean = false, val local: Boolean = false)
+internal data class WireRequest(val url: String, val headers: Map<String, String>, val body: JSONObject? = null, val catalog: Boolean = false, val local: Boolean = false,
+    val stream: Boolean = false, val format: WireFormat = WireFormat.OPENAI)
 internal class ProviderFailure(val code: Int,val waitMillis: Long=0,message: String): UserError(message) {
     val retryable get()=code in setOf(408,429,500,502,503,504) || code==0
 }
@@ -98,8 +97,15 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
     } catch (e: TimeoutCancellationException) {
         currentCoroutineContext().ensureActive(); throw UserError("Список не загрузился за 20 секунд. Проверьте интернет/VPN, адрес сервера и доступность провайдера.")
     }
+    private val mutableStats = kotlinx.coroutines.flow.MutableStateFlow<TokenStats?>(null)
+    /** Speed of the latest successful reply, shared by chat and agent. */
+    val stats: kotlinx.coroutines.flow.StateFlow<TokenStats?> = mutableStats
+
     suspend fun generate(provider: Provider, connection: Connection, turns: List<Turn>, system: String, agent: Boolean = false,
-        onRetry: (Int,Long)->Unit={_,_->}): String {
+        onRetry: (Int,Long)->Unit={_,_->}): String = generateDetailed(provider, connection, turns, system, agent, onRetry).text
+
+    suspend fun generateDetailed(provider: Provider, connection: Connection, turns: List<Turn>, system: String, agent: Boolean = false,
+        onRetry: (Int,Long)->Unit={_,_->}): Generation {
         if (connection.model.isBlank()) throw UserError("Выберите модель в разделе «Подключения».")
         val latestUser=turns.indexOfLast {it.role=="user"}
         val prepared=turns.mapIndexed {index,turn ->turn.copy(attachments=turn.attachments.map {file ->
@@ -113,7 +119,12 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
         val outputLimit = if(parameters.maxTokens == 0) modelLimit else minOf(parameters.maxTokens,modelLimit)
         // Agent protocol keeps its own sampling and instructions; user chat preferences cannot loosen it.
         val sampling = !agent && supportsSampling(provider,connection.model)
-        suspend fun request(wire: WireRequest)=send(wire,onRetry)
+        // Replies stream so the meter can see the first token; a local server without streaming support
+        // (HTTP 400 on the stream fields) is asked once more the plain way.
+        suspend fun request(wire: WireRequest): JSONObject = try { send(wire,onRetry) } catch (e: ProviderFailure) {
+            if (!(wire.stream && provider == Provider.LOCAL && e.code == 400)) throw e
+            send(wire.copy(stream = false, body = wire.body?.let { JSONObject(it.toString()).apply { remove("stream"); remove("stream_options") } }), onRetry)
+        }
         fun configure(body: JSONObject, gemini: Boolean = false): JSONObject {
             if(sampling && parameters.temperature >= 0) body.put("temperature",parameters.temperature.toDouble())
             // Claude recommends one sampling control; avoid sending temperature and top_p together.
@@ -132,9 +143,11 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                 }
                 val config = configure(JSONObject().put("maxOutputTokens", outputLimit),true)
                 if (agent) config.put("responseMimeType", "application/json")
-                request(WireRequest(base + "models/${connection.model}:generateContent", headers,
+                // Gemini 2.5+ thinks anyway; asking for the thought summary lets the chat show it.
+                if (connection.model.lowercase().contains(Regex("gemini-(2\\.5|[3-9])"))) config.put("thinkingConfig", JSONObject().put("includeThoughts", true))
+                request(WireRequest(base + "models/${connection.model}:streamGenerateContent?alt=sse", headers,
                     JSONObject().put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
-                        .put("contents", contents).put("generationConfig", config)))
+                        .put("contents", contents).put("generationConfig", config), stream = true, format = WireFormat.GEMINI))
             }
             Provider.CLAUDE -> {
                 val messages = JSONArray()
@@ -145,7 +158,8 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                         .put("source",JSONObject().put("type","base64").put("media_type",file.mime).put("data",file.data)))}
                     messages.put(JSONObject().put("role", turn.role).put("content", content))
                 }
-                request(WireRequest(base + "messages", headers, configure(JSONObject().put("model", connection.model).put("system", system).put("max_tokens", outputLimit).put("messages", messages))))
+                request(WireRequest(base + "messages", headers, configure(JSONObject().put("model", connection.model).put("system", system).put("max_tokens", outputLimit)
+                    .put("messages", messages).put("stream", true)), stream = true, format = WireFormat.CLAUDE))
             }
             else -> {
                 val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
@@ -163,29 +177,41 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                 val body = configure(JSONObject().put("model", connection.model).put("messages", messages)
                     .put(if (provider == Provider.OPENAI) "max_completion_tokens" else "max_tokens", outputLimit))
                 if (agent && provider == Provider.DEEPSEEK) body.put("response_format", JSONObject().put("type", "json_object"))
-                request(WireRequest(base + "chat/completions", headers, body, local = provider == Provider.LOCAL))
+                body.put("stream", true).put("stream_options", JSONObject().put("include_usage", true))
+                request(WireRequest(base + "chat/completions", headers, body, local = provider == Provider.LOCAL, stream = true, format = WireFormat.OPENAI))
             }
         }
-        val text = when (provider) {
+        var reasoning = ""
+        val raw = when (provider) {
             Provider.GEMINI -> {
                 val candidate = root.optJSONArray("candidates")?.optJSONObject(0) ?: throw UserError("Gemini не вернул ответ. Возможна блокировка содержимого.")
                 if (candidate.optString("finishReason") == "MAX_TOKENS") throw UserError("Ответ Gemini обрезан лимитом. Сократите задачу или выберите другую модель.")
                 if (candidate.optString("finishReason") in listOf("SAFETY", "RECITATION", "PROHIBITED_CONTENT")) throw UserError("Провайдер остановил ответ по своим ограничениям.")
                 val parts = candidate.optJSONObject("content")?.optJSONArray("parts") ?: JSONArray()
+                reasoning = (0 until parts.length()).mapNotNull { parts.optJSONObject(it)?.takeIf { p -> p.optBoolean("thought") }?.optString("text") }.joinToString("")
                 (0 until parts.length()).mapNotNull { parts.optJSONObject(it)?.takeUnless { p -> p.optBoolean("thought") }?.optString("text") }.joinToString("")
             }
             Provider.CLAUDE -> {
                 if (root.optString("stop_reason") == "max_tokens") throw UserError("Ответ Claude обрезан лимитом. Сократите задачу.")
                 val content = root.optJSONArray("content") ?: JSONArray()
+                reasoning = (0 until content.length()).mapNotNull { content.optJSONObject(it)?.takeIf { p -> p.optString("type") == "thinking" }?.optString("thinking") }.joinToString("")
                 (0 until content.length()).mapNotNull { content.optJSONObject(it)?.takeIf { p -> p.optString("type") == "text" }?.optString("text") }.joinToString("")
             }
             else -> {
                 val choice = root.optJSONArray("choices")?.optJSONObject(0) ?: throw UserError("Модель не вернула ответ.")
                 if (choice.optString("finish_reason") == "length") throw UserError("Ответ обрезан лимитом. Сократите задачу или выберите другую модель.")
-                choice.optJSONObject("message")?.optString("content") ?: ""
+                val message = choice.optJSONObject("message")
+                reasoning = message?.optString("reasoning_content").orEmpty().ifEmpty { message?.optString("reasoning").orEmpty() }
+                message?.optString("content") ?: ""
             }
         }
-        return text.trim().takeIf { it.isNotEmpty() } ?: throw UserError("Модель вернула пустой ответ.")
+        val (answer, inlineThought) = ReplyParts.splitThink(raw)
+        if (reasoning.isBlank()) reasoning = inlineThought
+        val text = answer.trim().takeIf { it.isNotEmpty() } ?: throw UserError("Модель вернула пустой ответ.")
+        val format = when (provider) { Provider.GEMINI -> WireFormat.GEMINI; Provider.CLAUDE -> WireFormat.CLAUDE; else -> WireFormat.OPENAI }
+        val stats = ReplyParts.stats(format, root, text, reasoning)
+        if (stats != null) mutableStats.value = stats
+        return Generation(text, reasoning.trim(), stats)
     }
     private fun base(provider: Provider, c: Connection) = if (provider == Provider.LOCAL) validateEndpoint(c.endpoint) else provider.base
     private fun unsupportedAttachment(provider: Provider,connection: Connection,file: AttachmentData): String? = when {
@@ -224,7 +250,8 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
             wire.body?.let { post(it.toString().toRequestBody("application/json; charset=utf-8".toMediaType())) }
         }.build()
         val call = (if (wire.catalog) catalogClient else if (wire.local) localClient else client).newCall(request)
-        val text = suspendCancellableCoroutine<String> { continuation ->
+        val started = System.nanoTime()
+        return suspendCancellableCoroutine<JSONObject> { continuation ->
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
@@ -237,20 +264,30 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                         val value = response.use {
                             if (!it.isSuccessful) throw httpError(it.code,it.header("Retry-After"))
                             val body = it.body ?: throw UserError("Сервис вернул пустой ответ.")
-                            if (body.contentLength() > 8_000_000) throw UserError("Ответ сервиса слишком большой.")
-                            val out = java.io.ByteArrayOutputStream()
-                            body.byteStream().use { input ->
-                                val buffer = ByteArray(16_384)
-                                while (true) { val count = input.read(buffer); if (count < 0) break; if (out.size() + count > 8_000_000) throw UserError("Ответ сервиса слишком большой."); out.write(buffer, 0, count) }
+                            if (wire.stream && body.contentType()?.subtype?.contains("event-stream") == true) {
+                                val assembler = StreamAssembler(wire.format, started)
+                                val source = body.source()
+                                while (true) {
+                                    val line = source.readUtf8Line() ?: break
+                                    if (line.startsWith("data:")) assembler.accept(line.removePrefix("data:"))
+                                }
+                                assembler.result()
+                            } else {
+                                if (body.contentLength() > 8_000_000) throw UserError("Ответ сервиса слишком большой.")
+                                val out = java.io.ByteArrayOutputStream()
+                                body.byteStream().use { input ->
+                                    val buffer = ByteArray(16_384)
+                                    while (true) { val count = input.read(buffer); if (count < 0) break; if (out.size() + count > 8_000_000) throw UserError("Ответ сервиса слишком большой."); out.write(buffer, 0, count) }
+                                }
+                                val json = runCatching { JSONObject(out.toString(Charsets.UTF_8.name())) }.getOrElse { throw UserError("Сервис вернул ответ в неизвестном формате.") }
+                                if (wire.catalog) json else json.put("_luma", JSONObject().put("totalMs", ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1)))
                             }
-                            out.toString(Charsets.UTF_8.name())
                         }
                         if (continuation.isActive) continuation.resume(value)
                     } catch (e: Exception) { if (continuation.isActive) continuation.resumeWithException(if (e is UserError) e else UserError("Соединение прервалось. Повторите запрос.")) }
                 }
             })
         }
-        return withContext(Dispatchers.Default) { runCatching { JSONObject(text) }.getOrElse { throw UserError("Сервис вернул ответ в неизвестном формате.") } }
     }
     companion object {
         fun supportsSampling(provider: Provider, model: String): Boolean {

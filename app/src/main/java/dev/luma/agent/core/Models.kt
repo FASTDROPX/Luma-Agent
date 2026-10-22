@@ -57,7 +57,7 @@ data class AppSettings(
     val dynamicColors: Boolean = true, val reducedMotion: Boolean = false, val panel: Boolean = true,
     val screenshots: Boolean = false, val confirmActions: Boolean = true, val folder: String = "",
     val visuals: VisualSettings = VisualSettings(), val maxSteps: Int = 20, val taskMinutes: Int = 8,
-    val unlimitedAgent: Boolean = true, val blockedWords: String = ""
+    val unlimitedAgent: Boolean = true, val blockedWords: String = "", val tokenMeter: Boolean = true
 ) {
     fun connection(p: Provider = provider) = connections[p] ?: Connection()
     fun withGeneration(p: Provider, model: String, change: (GenerationSettings) -> GenerationSettings): AppSettings {
@@ -72,7 +72,7 @@ data class AppSettings(
             .put("reducedMotion", reducedMotion).put("panel", panel).put("screenshots", screenshots)
             .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
             .put("maxSteps",maxSteps.coerceIn(5,30)).put("taskMinutes",taskMinutes.coerceIn(2,15)).put("unlimitedAgent", unlimitedAgent)
-            .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH))
+            .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH)).put("tokenMeter", tokenMeter)
     }
     companion object {
         fun parse(json: JSONObject): AppSettings {
@@ -88,7 +88,7 @@ data class AppSettings(
                 connections, json.optString("theme", "system").takeIf { it in listOf("system","light","dark") } ?: "system", json.optBoolean("dynamicColors", true), json.optBoolean("reducedMotion"),
                 json.optBoolean("panel", true), json.optBoolean("screenshots"), json.optBoolean("confirmActions", true), json.optString("folder"),
                 VisualSettings.parse(json.optJSONObject("visuals") ?: JSONObject()),json.optInt("maxSteps",20).coerceIn(5,30),json.optInt("taskMinutes",8).coerceIn(2,15),json.optBoolean("unlimitedAgent",true),
-                json.optString("blockedWords").take(BlockedWords.MAX_LENGTH))
+                json.optString("blockedWords").take(BlockedWords.MAX_LENGTH), json.optBoolean("tokenMeter", true))
         }
     }
 }
@@ -101,8 +101,11 @@ object BlockedWords {
 open class UserError(override val message: String) : RuntimeException(message)
 fun safeError(error: Throwable): String = if (error is UserError) error.message else "Не получилось выполнить запрос. Проверьте подключение и попробуйте ещё раз."
 data class Turn(val role: String, val text: String, val image: String? = null, val attachments: List<AttachmentData> = emptyList())
-data class ChatMessage(val id: Long, val role: String, val text: String, val timestamp: Long, val attachments: List<Attachment> = emptyList())
+data class ChatMessage(val id: Long, val role: String, val text: String, val timestamp: Long, val attachments: List<Attachment> = emptyList(),
+    val reasoning: String = "", val stats: TokenStats? = null)
 data class Conversation(val id: Long, val title: String, val updated: Long)
 data class Approval(val title: String, val details: String, val background: Boolean = false)
 data class RunState(val active: Boolean = false, val paused: Boolean = false, val stage: String = "", val step: Int = 0,
-    val chatId: Long = 0, val approval: Approval? = null, val error: String? = null, val retryPending: Boolean = false)
+    val chatId: Long = 0, val approval: Approval? = null, val error: String? = null, val retryPending: Boolean = false,
+    /** SystemClock.elapsedRealtime() when the task started; drives the run timer. */
+    val startedAt: Long = 0)

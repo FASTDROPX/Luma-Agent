@@ -52,6 +52,8 @@ import kotlin.math.roundToInt
     val busy by graph.chatBusy.collectAsStateWithLifecycle()
     val run by graph.agent.state.collectAsStateWithLifecycle()
     val overlayVisible by graph.overlayVisible.collectAsStateWithLifecycle()
+    val chatStartedAt by graph.chatStartedAt.collectAsStateWithLifecycle()
+    val tokenStats by graph.api.stats.collectAsStateWithLifecycle()
     val reduced=LocalReducedMotion.current
     var input by rememberSaveable(selected,stateSaver=TextFieldValue.Saver) {mutableStateOf(TextFieldValue(""))}
     var files by rememberSaveable(selected,stateSaver=Saver<List<Attachment>,String>(save={Attachment.encode(it)},restore={Attachment.decode(it)})) {mutableStateOf(emptyList())}
@@ -135,18 +137,23 @@ import kotlin.math.roundToInt
                 }) {prompt,agent ->asAgent=agent;input=TextFieldValue(prompt,TextRange(prompt.length))}
             } else {
                 MotionLazyColumn(Modifier.fillMaxSize().testTag("chat-thread"),state=list,contentPadding=PaddingValues(start=16.dp,end=16.dp,top=12.dp,bottom=22.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
+                    // Items only fade in: a fade-out on the list's last item could stay drawn after removal.
                     items(messages,key={"message-${it.id}"}) {message ->
                         val animate=remember(message.id) {message.role=="assistant" && message.timestamp>=openedAt && revealed.add(message.id)}
-                        MessageBubble(message,animate,graph.chats.attachments,onCursor={y->if(message.id==latestAnswer && !pending && !relevantRun) answer=Offset(left,y-origin.y)},onGrowth={scrollEvents.trySend(Unit)})
+                        Box(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(260),placementSpec=if(reduced) null else spring(stiffness=Spring.StiffnessMediumLow),fadeOutSpec=null)) {
+                            MessageBubble(message,animate,graph.chats.attachments,onCursor={y->if(message.id==latestAnswer && !pending && !relevantRun) answer=Offset(left,y-origin.y)},onGrowth={scrollEvents.trySend(Unit)})
+                        }
                     }
                     if(pending) item(key="thinking") {
-                        Row(Modifier.fillMaxWidth().heightIn(min=48.dp).padding(start=52.dp).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+it.size.height/2f)},verticalAlignment=Alignment.CenterVertically) {
+                        Row(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(220),placementSpec=null,fadeOutSpec=null).fillMaxWidth().heightIn(min=48.dp).padding(start=52.dp).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+it.size.height/2f)},verticalAlignment=Alignment.CenterVertically) {
+                            val elapsed=rememberElapsed(chatStartedAt)
                             Text("Готовлю ответ…",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            if(elapsed>=1000) Text("  ${dev.luma.agent.core.formatElapsed(elapsed)}",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f))
                         }
                     }
                     if(relevantRun) item(key="agent") {
-                        Box(Modifier.onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+with(density) {38.dp.toPx()})}) {
-                            RunCard(run,approve={scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()})
+                        Box(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(260),placementSpec=if(reduced) null else spring(stiffness=Spring.StiffnessMediumLow),fadeOutSpec=null).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+with(density) {38.dp.toPx()})}) {
+                            RunCard(run,approve={scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},elapsed=rememberElapsed(run.startedAt),stats=tokenStats.takeIf {settings.tokenMeter},meterActive=settings.tokenMeter)
                         }
                     }
                     item(key="tail") {Spacer(Modifier.height(4.dp))}
@@ -168,7 +175,11 @@ import kotlin.math.roundToInt
                         scene.particles.filterIndexed {i,_->i%3==0}.map {CursorSeed(it.x,it.y,it.z,it.size,it.shade)}
                     }
                 }}.graphicsLayer {this.alpha=if(overlayVisible) 0f else alpha}.testTag("chat-follow-orb"),simulation=scene,interactive=empty && visible && !overlayVisible)
-            if(!follow && messages.isNotEmpty()) FilledTonalButton(onClick={follow=true;scrollEvents.trySend(Unit)},modifier=Modifier.align(Alignment.BottomEnd).padding(12.dp)) {Icon(Icons.Outlined.ArrowDownward,null,Modifier.size(18.dp));Spacer(Modifier.width(6.dp));Text("К последнему")}
+            androidx.compose.animation.AnimatedVisibility(visible=!follow && messages.isNotEmpty(),modifier=Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                enter=if(reduced) EnterTransition.None else fadeIn(tween(180))+scaleIn(tween(220),initialScale=.85f)+slideInVertically(tween(220)) {it/2},
+                exit=if(reduced) ExitTransition.None else fadeOut(tween(140))+scaleOut(tween(160),targetScale=.9f)) {
+                FilledTonalButton(onClick={follow=true;scrollEvents.trySend(Unit)}) {Icon(Icons.Outlined.ArrowDownward,null,Modifier.size(18.dp));Spacer(Modifier.width(6.dp));Text("К последнему")}
+            }
             if(sendTick>0 && sending.value<1f) Surface(Modifier.align(Alignment.BottomEnd).padding(horizontal=20.dp,vertical=8.dp).widthIn(max=240.dp).graphicsLayer {this.alpha=(1f-sending.value)*.8f;translationY=-sending.value*56.dp.toPx();scaleX=1f-sending.value*.12f;scaleY=scaleX}.clearAndSetSemantics {},shape=RoundedCornerShape(22.dp),color=MaterialTheme.colorScheme.primaryContainer) {
                 Text(sentPreview,Modifier.padding(horizontal=16.dp,vertical=10.dp),maxLines=2,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.bodyMedium)
             }
@@ -187,15 +198,16 @@ import kotlin.math.roundToInt
                     if(!busy && files.any {it.id==file.id}) {files=files.filterNot {it.id==file.id};scope.launch(Dispatchers.IO) {graph.chats.attachments.file(file).delete()}}
                 }
                 if(importing) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical=4.dp))
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.Bottom) {
-                    IconButton(onClick={picker.launch(arrayOf("*/*"))},enabled=!busy && !run.active && !importing && files.size<4,modifier=Modifier.size(40.dp).padding(bottom=4.dp).testTag("chat-attach")) {Icon(Icons.Outlined.Add,"Прикрепить файлы")}
+                // Attach, text and send share one 44 dp line; with more lines the buttons stay at the bottom.
+                Row(Modifier.fillMaxWidth().padding(vertical=2.dp),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.Bottom) {
+                    IconButton(onClick={picker.launch(arrayOf("*/*"))},enabled=!busy && !run.active && !importing && files.size<4,modifier=Modifier.size(44.dp).testTag("chat-attach")) {Icon(Icons.Outlined.Add,"Прикрепить файлы",Modifier.size(24.dp))}
                     BasicTextField(input,{if(it.text.length<=12_000) input=it else graph.uiMessage.value="Сократите сообщение до 12 000 символов."},
-                        Modifier.weight(1f).heightIn(min=52.dp).padding(top=12.dp,bottom=12.dp).then(wipe.modifier).testTag("chat-input"),
+                        Modifier.weight(1f).heightIn(min=44.dp).padding(vertical=11.dp).then(wipe.modifier).testTag("chat-input"),
                         textStyle=MaterialTheme.typography.bodyLarge.copy(color=MaterialTheme.colorScheme.onSurface),maxLines=4,
                         visualTransformation=smoothInput(input),onTextLayout={wipe.layout=it},cursorBrush=SolidColor(MaterialTheme.colorScheme.primary),decorationBox={field ->
                             Box {if(input.text.isEmpty()) Text(if(asAgent) "Какую задачу выполнить?" else "Напиши сообщение…",style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f),maxLines=1,overflow=TextOverflow.Ellipsis);field()}
                         })
-                    GradientActionButton(busy || run.active,!importing && (input.text.isNotBlank() || files.isNotEmpty()),sendTick,::submit)
+                    GradientActionButton(busy || run.active,!importing && (input.text.isNotBlank() || files.isNotEmpty()),sendTick,::submit,diameter=44.dp)
                 }
                 AgentAccessMode(settings.confirmActions,enabled=!busy && !run.active) {ask->graph.update {it.copy(confirmActions=ask)}}
             }
@@ -234,7 +246,7 @@ import kotlin.math.roundToInt
     Surface(onClick = click, modifier = modifier, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 6.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) { Icon(icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(6.dp)) }
-            Text(label, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            Text(label, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -251,26 +263,51 @@ import kotlin.math.roundToInt
             }
         }
     } else {
-        Column(Modifier.fillMaxWidth().padding(start=52.dp).testTag("reply-${message.id}"),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+        // A new answer arrives whole and fades in as a block; text is never revealed letter by letter.
+        Column(Modifier.fillMaxWidth().padding(start=52.dp).then(if(animate) Modifier.appear() else Modifier).testTag("reply-${message.id}"),verticalArrangement=Arrangement.spacedBy(6.dp)) {
             Text("Luma",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
-            MarkdownContent(message.text,Modifier.fillMaxWidth(),animate=animate,onCursor=onCursor,onGrowth=onGrowth)
+            if(message.reasoning.isNotBlank()) ThinkingBlock(message.reasoning,message.stats)
+            MarkdownContent(message.text,Modifier.fillMaxWidth(),onCursor=onCursor,onGrowth=onGrowth)
+            AnswerActions(message)
         }
     }
 }
 @Composable fun Thinking(label: String) {Text(label,Modifier.padding(8.dp),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)}
-@Composable fun RunCard(run: RunState, approve: () -> Unit, reject: () -> Unit, pause: () -> Unit, stop: () -> Unit, maxSteps: Int = 20,retry: ()->Unit={}) {
+@Composable fun RunCard(run: RunState, approve: () -> Unit, reject: () -> Unit, pause: () -> Unit, stop: () -> Unit, maxSteps: Int = 20,retry: ()->Unit={},
+    elapsed: Long = 0, stats: dev.luma.agent.core.TokenStats? = null, meterActive: Boolean = false) {
     SoftCard(Modifier.animateContentSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.size(30.dp))
-            Column(Modifier.weight(1f)) { Text(if (run.approval != null) "Нужно подтверждение" else if (run.paused) "Агент на паузе" else "Luma работает", style = MaterialTheme.typography.titleSmall); Text(if(maxSteps==0) "Шаг ${run.step} · без лимита" else "Шаг ${run.step} из $maxSteps", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Column(Modifier.weight(1f)) { Text(if (run.approval != null) "Нужно подтверждение" else if (run.paused) "Агент на паузе" else "Luma работает", style = MaterialTheme.typography.titleSmall); Text((if(maxSteps==0) "Шаг ${run.step} · без лимита" else "Шаг ${run.step} из $maxSteps") + " · ${dev.luma.agent.core.formatElapsed(elapsed)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("run-timer"))
+                if (meterActive) TokenMeter(stats, run.active && run.approval == null && !run.paused, Modifier.offset(x = (-6).dp)) }
             IconButton(onClick = stop) { Icon(Icons.Outlined.StopCircle, "Остановить") }
         }
-        Text(run.approval?.title ?: run.stage, style = MaterialTheme.typography.bodyMedium)
+        AnimatedContent(run.approval?.title ?: run.stage, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(120)) }, label = "run stage") { stage ->
+            Text(stage, style = MaterialTheme.typography.bodyMedium)
+        }
         run.approval?.let { approval ->
             Text(approval.details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (approval.background) Text("После разрешения Luma свернётся и продолжит действие в предыдущем приложении.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = approve, modifier = Modifier.weight(1f)) { Text("Разрешить") }; OutlinedButton(onClick = reject, modifier = Modifier.weight(1f)) { Text("Отменить") } }
         } ?: if(run.retryPending) Button(onClick=retry,modifier=Modifier.fillMaxWidth()) {Icon(Icons.Outlined.Refresh,null);Spacer(Modifier.width(8.dp));Text("Повторить запрос")}
         else OutlinedButton(onClick = pause, modifier = Modifier.fillMaxWidth()) { Icon(if (run.paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause, null); Spacer(Modifier.width(8.dp)); Text(if (run.paused) "Продолжить" else "Пауза") }
+    }
+}
+
+/** Copy plus a quiet footnote: generation speed and total time of this answer, when known. */
+@Composable private fun AnswerActions(message: ChatMessage) {
+    val clipboard=LocalClipboardManager.current
+    var copied by remember(message.id) {mutableStateOf(false)}
+    LaunchedEffect(copied) {if(copied) {delay(1600);copied=false}}
+    Row(Modifier.offset(x=(-10).dp),verticalAlignment=Alignment.CenterVertically) {
+        IconButton(onClick={clipboard.setText(androidx.compose.ui.text.AnnotatedString(message.text));copied=true},Modifier.size(36.dp).testTag("copy-${message.id}")) {
+            Crossfade(copied,animationSpec=tween(180),label="copied") {done ->
+                Icon(if(done) Icons.Outlined.Check else Icons.Outlined.ContentCopy,if(done) "Скопировано" else "Копировать ответ",Modifier.size(17.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        message.stats?.let {stats ->
+            val parts=listOfNotNull(stats.outputPerSecond?.let {"↓ ${dev.luma.agent.core.formatRate(it)} т/с"},stats.totalMs.takeIf {it>0}?.let {"%.1f с".format(java.util.Locale.ROOT,it/1000.0).replace('.',',')})
+            if(parts.isNotEmpty()) Text(parts.joinToString(" · "),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.75f))
+        }
     }
 }
