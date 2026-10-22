@@ -20,6 +20,25 @@ class CoreTest {
         rejects { AgentProtocol.parse("Just click something") }
         rejects { AgentProtocol.parse("{\"type\":\"final\",\"text\":\"ok\"}{\"type\":\"tool\"}") }
     }
+    @Test fun protocolToleratesCommonModelFormatSlipsButNotAmbiguity() {
+        fun tool(raw: String) = AgentProtocol.parse(raw) as AgentReply.Tool
+        assertEquals("home",tool("""[{"type":"tool","tool":"home","args":{}}]""").name)
+        assertEquals("home",tool("""{"tool":"home","args":{}}""").name)
+        assertEquals("home",tool("""{"type":"home","args":{}}""").name)
+        assertEquals("home",tool("""{"type":"tool_call","name":"home"}""").name)
+        assertEquals("новости",tool("""Вот команда: {"type":"action","tool":"set_text","arguments":"{\"snapshot\":\"s\",\"node\":3,\"text\":\"новости\"}"}""").args.getString("text"))
+        assertEquals("home",tool("<think>надо домой</think>\n```json\n{\"type\":\"tool\",\"tool\":\"home\",\"args\":{}}\n```").name)
+        assertEquals("Готово",(AgentProtocol.parse("""{"type":"answer","message":"Готово"}""") as AgentReply.Final).text)
+        assertEquals("Готово",(AgentProtocol.parse("""{"text":"Готово"}""") as AgentReply.Final).text)
+        // A whole plan: only the first step runs, the rest is counted and dropped.
+        assertEquals(1,tool("""[{"type":"tool","tool":"home"},{"type":"tool","tool":"back"}]""").skipped)
+        val plan=tool("""{"type":"home","message":"Returning to home screen"}{"type":"tool","tool":"open_app","args":{"package":"com.android.chrome"}}""")
+        assertEquals("home",plan.name);assertEquals(1,plan.skipped)
+        assertEquals(0,tool("""{"type":"tool","tool":"home","args":{}}""").skipped)
+        rejects { AgentProtocol.parse("""{"type":"final","text":"Готово"},{"type":"tool","tool":"home"}""") }
+        rejects { AgentProtocol.parse("""{"type":"maybe","x":1}""") }
+        try { AgentProtocol.parse("""{"kind":"weird"}"""); fail() } catch (e: UserError) { assertTrue(e.message.contains("weird")) }
+    }
     @Test fun filePathsCannotEscapeSelectedRoot() {
         assertEquals(listOf("Учёба","заметка.txt"), relativeParts("Учёба/заметка.txt"))
         listOf("../x","a/../../b","/sdcard/x","content://secret","a\\b","a/./x","a\u0000b").forEach { rejects { relativeParts(it) } }
@@ -76,6 +95,7 @@ class CoreTest {
         for(p in listOf(Provider.OPENAI,Provider.OPENROUTER,Provider.DEEPSEEK,Provider.LOCAL)){
             val api=ProviderClient { request ->
                 assertEquals("chosen-model",request.body!!.getString("model"));assertTrue(request.url.endsWith("chat/completions"))
+                assertEquals(p==Provider.LOCAL,request.local) // only local servers get the long thinking timeout
                 JSONObject("""{"choices":[{"finish_reason":"stop","message":{"content":"answer"}}]}""")
             }
             assertEquals("answer",api.generate(p,Connection("test-key","chosen-model","http://127.0.0.1:11434/v1/"),listOf(Turn("user","question")),"system"))

@@ -103,7 +103,15 @@ import dev.luma.agent.*
             Text("Luma сможет читать доступные элементы экрана и выполнять запущенные тобой задачи. Отключить службу можно там же.", style = MaterialTheme.typography.bodySmall)
             if (Build.VERSION.SDK_INT >= 33) {
                 TextButton(onClick = { restrictedHelp = !restrictedHelp }) { Text("Если Android запрещает включение") }
-                AnimatedVisibility(restrictedHelp) { Text("Для APK, установленного вручную: настройки Android → приложения → Luma → меню ⋮ → «Разрешить ограниченные настройки», если этот пункт доступен. Затем вернись в специальные возможности. Названия пунктов зависят от производителя.", style = MaterialTheme.typography.bodySmall) }
+                AnimatedVisibility(restrictedHelp) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Android блокирует специальные возможности для APK, установленного вручную. Сначала попробуй включить службу, чтобы Android показал запрет. Затем: настройки приложения Luma → меню ⋮ → «Разрешить ограниченные настройки» → вернись в специальные возможности. Названия пунктов зависят от производителя.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(onClick = {
+                            runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))) }
+                                .onFailure { graph.uiMessage.value = "Откройте настройки → приложения → Luma вручную." }
+                        }, modifier = Modifier.fillMaxWidth().testTag("open-app-info")) { Text("Открыть настройки Luma") }
+                    }
+                }
             }
         }
     }, confirmButton = { TextButton(onClick = { explanation = false; runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.onFailure { graph.uiMessage.value = "Откройте специальные возможности вручную в настройках Android." } }) { Text("Открыть настройки") } }, dismissButton = { TextButton(onClick = { explanation = false }) { Text("Позже") } })

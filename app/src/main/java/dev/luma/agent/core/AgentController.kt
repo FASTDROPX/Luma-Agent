@@ -68,6 +68,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
                                         kotlinx.coroutines.currentCoroutineContext().ensureActive()
                                         ToolResult(JSONObject().put("error", "Действие не завершилось вовремя.").put("note", "Не считайте действие выполненным. Обновите экран."))
                                     }
+                                if (reply.skipped > 0) result.json.put("protocolNote", "Выполнена только первая команда, ещё ${reply.skipped} отброшено. Присылай одну команду за ответ и планируй следующий шаг по новому экрану.")
                                 chats.append(chat, "tool", label + if (result.json.has("error")) " · ${result.json.optString("error")}" else " · готово")
                                 memory.record(reply, raw, result.json, result.image)
                                 if (reply.name != "remember" && loopGuard.repeated(reply, result.json)) {

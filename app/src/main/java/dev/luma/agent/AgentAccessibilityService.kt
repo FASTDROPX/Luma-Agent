@@ -38,6 +38,7 @@ class AgentAccessibilityService : AccessibilityService() {
     companion object {
         @Volatile var instance: AgentAccessibilityService? = null; private set
         val connected = MutableStateFlow(false)
+        internal const val SNAPSHOT_MAX_AGE_MS = 10 * 60_000L
     }
     private data class Node(val info: AccessibilityNodeInfo, val signature: String)
     private val nodes = mutableMapOf<Int, Node>()
@@ -130,7 +131,10 @@ class AgentAccessibilityService : AccessibilityService() {
     @Suppress("DEPRECATION")
     private fun validateSnapshot(args: JSONObject) {
         unlocked()
-        if (args.requiredString("snapshot") != snapshot || snapshot.isEmpty() || android.os.SystemClock.elapsedRealtime() - snapshotTime > 90_000) throw UserError("Снимок устарел. Сначала снова прочитайте screen.")
+        // The model only ever sees the latest screen, so a missing id means that one. The age limit is
+        // generous because local models can think for minutes; window, size and node checks still apply.
+        val requested = (args.opt("snapshot") as? String)?.takeIf { it.isNotBlank() } ?: snapshot
+        if (requested != snapshot || snapshot.isEmpty() || android.os.SystemClock.elapsedRealtime() - snapshotTime > SNAPSHOT_MAX_AGE_MS) throw UserError("Снимок устарел. Сначала снова прочитайте screen.")
         val metrics=android.util.DisplayMetrics()
         (getSystemService(WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.getRealMetrics(metrics)
         if(metrics.widthPixels!=physicalWidth || metrics.heightPixels!=physicalHeight) throw UserError("Размер экрана изменился. Снова прочитайте screen.")
@@ -181,7 +185,7 @@ class AgentAccessibilityService : AccessibilityService() {
         when (name) {
             "tap" -> {
                 pointAtNode(args)
-                if (!node(args).performAction(AccessibilityNodeInfo.ACTION_CLICK)) throw UserError("Элемент не поддерживает нажатие. Обновите экран.")
+                if (!click(node(args))) throw UserError("Элемент не поддерживает нажатие. Обновите экран.")
                 visuals?.pulse()
             }
             "set_text" -> {
@@ -231,6 +235,17 @@ class AgentAccessibilityService : AccessibilityService() {
             else -> throw UserError("Неизвестное действие экрана.")
         }
         delay(450); JSONObject().put("ok", true).put("next", "Проверьте результат через screen")
+    }
+    /** A label is often not clickable itself; like a finger, the tap lands on its nearest clickable container. */
+    private fun click(target: AccessibilityNodeInfo): Boolean {
+        if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+        var current: AccessibilityNodeInfo? = target.parent
+        repeat(6) {
+            val node = current ?: return false
+            if (node.isClickable && node.isEnabled && node.isVisibleToUser && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            current = node.parent
+        }
+        return false
     }
     private suspend fun pointAtNode(args: JSONObject) {
         val before=node(args);val rect=Rect();before.getBoundsInScreen(rect)

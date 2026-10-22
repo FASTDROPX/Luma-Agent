@@ -24,7 +24,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-internal data class WireRequest(val url: String, val headers: Map<String, String>, val body: JSONObject? = null, val catalog: Boolean = false)
+/** [local]: a model on the user's own hardware may think for minutes before the first byte. */
+internal data class WireRequest(val url: String, val headers: Map<String, String>, val body: JSONObject? = null, val catalog: Boolean = false, val local: Boolean = false)
 internal class ProviderFailure(val code: Int,val waitMillis: Long=0,message: String): UserError(message) {
     val retryable get()=code in setOf(408,429,500,502,503,504) || code==0
 }
@@ -41,6 +42,7 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
         .callTimeout(100, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
         .addInterceptor(localCleartextOnly).build()
     private val catalogClient = client.newBuilder().connectTimeout(6, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).callTimeout(20, TimeUnit.SECONDS).build()
+    private val localClient = client.newBuilder().readTimeout(300, TimeUnit.SECONDS).callTimeout(330, TimeUnit.SECONDS).build()
     suspend fun models(provider: Provider, connection: Connection): List<ModelInfo> = try {
         withTimeout(20_000) {
             val base = base(provider, connection); val headers = headers(provider, connection)
@@ -77,7 +79,8 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                     val limit = when (provider) {
                         Provider.GEMINI -> row.optInt("outputTokenLimit", 8192)
                         Provider.OPENROUTER -> row.optJSONObject("top_provider")?.optInt("max_completion_tokens", 8192) ?: 8192
-                        Provider.LOCAL -> 2048
+                        // Local reasoning models spend tokens on thinking before the JSON command.
+                        Provider.LOCAL -> 8192
                         Provider.OPENAI -> if (id.startsWith("gpt-3")) 4096 else 8192
                         else -> 8192
                     }.let { if (it > 0) minOf(it, 8192) else 8192 }
@@ -160,7 +163,7 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                 val body = configure(JSONObject().put("model", connection.model).put("messages", messages)
                     .put(if (provider == Provider.OPENAI) "max_completion_tokens" else "max_tokens", outputLimit))
                 if (agent && provider == Provider.DEEPSEEK) body.put("response_format", JSONObject().put("type", "json_object"))
-                request(WireRequest(base + "chat/completions", headers, body))
+                request(WireRequest(base + "chat/completions", headers, body, local = provider == Provider.LOCAL))
             }
         }
         val text = when (provider) {
@@ -220,7 +223,7 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
             header("Accept", "application/json")
             wire.body?.let { post(it.toString().toRequestBody("application/json; charset=utf-8".toMediaType())) }
         }.build()
-        val call = (if (wire.catalog) catalogClient else client).newCall(request)
+        val call = (if (wire.catalog) catalogClient else if (wire.local) localClient else client).newCall(request)
         val text = suspendCancellableCoroutine<String> { continuation ->
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
