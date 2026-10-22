@@ -29,7 +29,34 @@ data class TokenStats(val inputTokens: Int, val outputTokens: Int, val firstToke
     }
 }
 
-data class Generation(val text: String, val reasoning: String = "", val stats: TokenStats? = null)
+data class Generation(val text: String, val reasoning: String = "", val stats: TokenStats? = null, val images: List<GeneratedImage> = emptyList())
+
+/** A picture the model drew; bytes are kept as received and normalised only when saved to the chat. */
+class GeneratedImage(val mime: String, val bytes: ByteArray) {
+    val extension: String get() = when (mime) { "image/jpeg" -> "jpg"; "image/webp" -> "webp"; else -> "png" }
+    companion object {
+        private const val MAX_BYTES = 16_000_000
+        fun decode(mime: String, base64: String): GeneratedImage? {
+            if (base64.isBlank() || !mime.startsWith("image/") || base64.length > MAX_BYTES * 4 / 3 + 8) return null
+            val bytes = runCatching { java.util.Base64.getMimeDecoder().decode(base64) }.getOrNull() ?: return null
+            return if (bytes.isEmpty() || bytes.size > MAX_BYTES) null else GeneratedImage(mime.substringBefore(';'), bytes)
+        }
+        /** "data:image/png;base64,...." as OpenRouter returns it; remote URLs are never fetched. */
+        fun fromDataUrl(url: String): GeneratedImage? {
+            val match = Regex("^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$", RegexOption.DOT_MATCHES_ALL).find(url.trim()) ?: return null
+            return decode(match.groupValues[1], match.groupValues[2])
+        }
+        /** Some models put a drawn picture into the text as ![](data:image/...); it becomes a real picture. */
+        fun extractInline(text: String): Pair<String, List<GeneratedImage>> {
+            if (!text.contains("data:image/")) return text to emptyList()
+            val found = mutableListOf<GeneratedImage>()
+            val clean = Regex("""!\[[^\]]*\]\((data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+)\)""").replace(text) { m ->
+                fromDataUrl(m.groupValues[1].filterNot { it.isWhitespace() })?.let { found += it; "" } ?: m.value
+            }
+            return (if (found.isEmpty()) text else clean.replace(Regex("\n{3,}"), "\n\n").trim()) to found
+        }
+    }
+}
 
 internal enum class WireFormat { OPENAI, GEMINI, CLAUDE }
 

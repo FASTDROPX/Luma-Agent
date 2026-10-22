@@ -37,21 +37,34 @@ import kotlinx.coroutines.delay
 }
 
 /** "↑ 812 · ↓ 38 т/с": prompt and generation speed of the latest reply. Tap for details. */
-@Composable fun TokenMeter(stats: TokenStats?, busy: Boolean, modifier: Modifier = Modifier) {
+@Composable fun TokenMeter(stats: TokenStats?, busy: Boolean, modifier: Modifier = Modifier, usage: dev.luma.agent.core.UsageSummary? = null) {
     var details by remember { mutableStateOf(false) }
     val pulse = if (busy && !LocalReducedMotion.current) {
         val transition = rememberInfiniteTransition(label = "meter pulse")
         transition.animateFloat(.45f, 1f, infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "meter alpha").value
     } else 1f
     val label = if (stats == null) "т/с —" else "↑ ${formatRate(stats.inputPerSecond)} · ↓ ${formatRate(stats.outputPerSecond)} т/с"
-    AnimatedContent(label, modifier.testTag("token-meter").clip(RoundedCornerShape(8.dp)).clickable(enabled = stats != null) { details = true }
+    AnimatedContent(label, modifier.testTag("token-meter").clip(RoundedCornerShape(8.dp)).clickable(enabled = stats != null || usage != null) { details = true }
         .graphicsLayer { alpha = pulse }.padding(horizontal = 6.dp, vertical = 1.dp),
         transitionSpec = { (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 2 }) togetherWith (fadeOut(tween(160)) + slideOutVertically(tween(160)) { -it / 2 }) },
         label = "meter value") { text ->
         Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
     }
-    if (details && stats != null) AlertDialog(onDismissRequest = { details = false }, icon = { Icon(Icons.Outlined.Speed, null) },
-        title = { Text("Скорость последнего ответа") }, text = {
+    if (details && (stats != null || usage != null)) AlertDialog(onDismissRequest = { details = false }, icon = { Icon(Icons.Outlined.Speed, null) },
+        title = { Text(if (stats != null) "Скорость последнего ответа" else "Расход токенов") }, text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (stats != null) TokenDetails(stats)
+                usage?.let { u ->
+                    if (stats != null) HorizontalDivider()
+                    Text("Расход токенов", style = MaterialTheme.typography.titleSmall)
+                    MeterRow("Этот чат", tokens(u.chatInput + u.chatOutput), "↑ ${tokens(u.chatInput)} · ↓ ${tokens(u.chatOutput)}")
+                    MeterRow("Сегодня", tokens(u.dayInput + u.dayOutput), "↑ ${tokens(u.dayInput)} · ↓ ${tokens(u.dayOutput)}")
+                }
+            }
+        }, confirmButton = { TextButton(onClick = { details = false }) { Text("Понятно") } })
+}
+private fun tokens(n: Long) = "%,d".format(java.util.Locale.ROOT, n).replace(',', ' ')
+@Composable private fun TokenDetails(stats: TokenStats) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 MeterRow("Вход", "${stats.inputTokens} ток.", if (stats.firstTokenMs > 0) "${formatRate(stats.inputPerSecond)} т/с за ${seconds(stats.firstTokenMs)}" else "без потока — не измерить")
                 MeterRow("Выход", "${if (stats.estimated) "≈" else ""}${stats.outputTokens} ток.", "${formatRate(stats.outputPerSecond)} т/с")
@@ -61,7 +74,6 @@ import kotlinx.coroutines.delay
                     if (stats.estimated) "Сервер не сообщил число токенов — выход оценён по длине текста." else "",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }, confirmButton = { TextButton(onClick = { details = false }) { Text("Понятно") } })
 }
 @Composable private fun MeterRow(title: String, value: String, extra: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

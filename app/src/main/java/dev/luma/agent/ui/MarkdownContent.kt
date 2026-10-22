@@ -44,11 +44,9 @@ import kotlin.math.*
 internal object MarkdownEngine {
     private val executor=Executors.newFixedThreadPool(2) {Thread(it,"luma-markdown").apply {isDaemon=true}}
     fun safeLink(raw: String): Boolean = runCatching {val u=java.net.URI(raw);u.scheme?.lowercase() in setOf("https","http","mailto") && u.rawUserInfo==null}.getOrDefault(false)
-    fun create(context: Context,dark: Boolean,textSize: Float): Markwon {
+    fun create(context: Context,palette: MarkdownPalette,textSize: Float): Markwon {
         ru.noties.jlatexmath.JLatexMathAndroid.init(context.applicationContext)
-        val ink=if(dark) 0xffe8edf8.toInt() else 0xff202633.toInt()
-        val accent=if(dark) 0xffb7c9ff.toInt() else 0xff465ea1.toInt()
-        val background=if(dark) 0xff202634.toInt() else 0xffe9edf6.toInt()
+        val ink=palette.ink;val accent=palette.accent;val background=palette.code
         return Markwon.builder(context).usePlugin(StrikethroughPlugin.create()).usePlugin(TablePlugin.create(context))
             .usePlugin(TaskListPlugin.create(context)).usePlugin(LinkifyPlugin.create()).usePlugin(HtmlPlugin.create())
             .usePlugin(MarkwonInlineParserPlugin.create())
@@ -56,10 +54,15 @@ internal object MarkdownEngine {
             .usePlugin(object: AbstractMarkwonPlugin() {
                 override fun configureTheme(builder: MarkwonTheme.Builder) {
                     val density=context.resources.displayMetrics.density
-                    builder.linkColor(accent).isLinkUnderlined(true).codeBackgroundColor(background).codeBlockBackgroundColor(background)
-                        .codeTextColor(ink).codeBlockTextColor(ink).codeBlockMargin((10*density).roundToInt())
-                        .headingBreakHeight(0).blockQuoteColor(accent).thematicBreakColor(accent)
-                        .headingTextSizeMultipliers(floatArrayOf(1.55f,1.35f,1.2f,1.12f,1.05f,1f))
+                    // Colours come from the app theme: accent bullets, quotes and links, soft code chips, medium headings.
+                    builder.linkColor(accent).isLinkUnderlined(false).codeBackgroundColor(background).codeBlockBackgroundColor(background)
+                        .codeTextColor(palette.codeInk).codeBlockTextColor(ink).codeBlockMargin((10*density).roundToInt())
+                        .codeTypeface(Typeface.MONOSPACE).codeTextSize((textSize*.88f).roundToInt())
+                        .headingBreakHeight(0).headingTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL))
+                        .blockQuoteColor(palette.quote).blockQuoteWidth((3*density).roundToInt())
+                        .thematicBreakColor(palette.rule).thematicBreakHeight((1*density).roundToInt().coerceAtLeast(1))
+                        .listItemColor(accent).bulletWidth((6*density).roundToInt()).blockMargin((22*density).roundToInt())
+                        .headingTextSizeMultipliers(floatArrayOf(1.45f,1.28f,1.16f,1.08f,1.03f,1f))
                 }
                 override fun configureConfiguration(builder: MarkwonConfiguration.Builder) {
                     builder.linkResolver {view,url ->if(safeLink(url)) runCatching {view.context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))}}
@@ -184,30 +187,39 @@ internal class MarkdownView(context: Context): TextView(context) {
     override fun onDetachedFromWindow() {dispose();super.onDetachedFromWindow()}
 }
 
+/** Markdown colours taken from the app theme (ARGB ints for Markwon). */
+internal data class MarkdownPalette(val ink: Int,val accent: Int,val code: Int,val codeInk: Int,val quote: Int,val rule: Int)
+
 @Composable fun MarkdownContent(source: String,modifier: Modifier=Modifier,animate: Boolean=false,
-    onCursor: (Float)->Unit={},onGrowth: ()->Unit={}) {
+    onCursor: (Float)->Unit={},onGrowth: ()->Unit={},onLongPress: (()->Unit)?=null) {
     // A reply is shown whole. Text runs render through Markwon, GFM tables through MarkdownTable
-    // so each column is as wide as its content. onCursor reports the y of the reply's last line.
+    // so each column is as wide as its content, fenced code through CodeBlock. onCursor reports
+    // the y of the reply's last line.
     val segments=remember(source) {splitMarkdownTables(source)}
     val cursor by rememberUpdatedState(onCursor);val growth by rememberUpdatedState(onGrowth)
     val lastLine=with(LocalDensity.current) {14.dp.toPx()}
     androidx.compose.foundation.layout.Column(modifier.onGloballyPositioned {c ->cursor(c.positionInRoot().y+(c.size.height-lastLine).coerceAtLeast(lastLine))}
         .onSizeChanged {growth()},verticalArrangement=androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
         for(segment in segments) when(segment) {
-            is MarkdownSegment.Text -> MarkdownText(segment.markdown,Modifier.fillMaxWidth())
-            is MarkdownSegment.Table -> MarkdownTable(segment)
+            is MarkdownSegment.Text -> MarkdownText(segment.markdown,Modifier.fillMaxWidth(),onLongPress)
+            is MarkdownSegment.Table -> MarkdownTable(segment,onLongPress)
+            is MarkdownSegment.Code -> CodeBlock(segment,onLongPress)
         }
     }
 }
-@Composable private fun MarkdownText(source: String,modifier: Modifier) {
+@Composable private fun MarkdownText(source: String,modifier: Modifier,onLongPress: (()->Unit)?) {
     val context=LocalContext.current;val density=LocalDensity.current
     val colors=MaterialTheme.colorScheme;val ink=colors.onSurface.toArgb()
-    val dark=colors.background.luminance()<.45f
-    val size=with(density) {MaterialTheme.typography.bodyLarge.fontSize.toPx()}
-    val renderer=remember(context,dark,size) {MarkdownEngine.create(context,dark,size)}
+    val palette=MarkdownPalette(ink,colors.primary.toArgb(),colors.surfaceContainerHigh.toArgb(),colors.tertiary.toArgb(),
+        colors.primary.copy(alpha=.55f).toArgb(),colors.outlineVariant.toArgb())
+    val size=with(density) {MaterialTheme.typography.bodyLarge.fontSize.toPx()}*LocalChatTextScale.current
+    val renderer=remember(context,palette,size) {MarkdownEngine.create(context,palette,size)}
     val parsed by produceState<Spanned?>(null,source,renderer) {value=withContext(Dispatchers.Default) {renderer.toMarkdown(normalizeMath(source))}}
+    val longPress by rememberUpdatedState(onLongPress)
     AndroidView(factory={MarkdownView(it)},modifier=modifier,onRelease={it.dispose()},update={view ->
         view.setTextColor(ink);view.setTextSize(TypedValue.COMPLEX_UNIT_PX,size)
+        // With a message menu, a long press opens it; text can still be selected from the menu.
+        if(onLongPress!=null) view.setOnLongClickListener {longPress?.invoke();true} else view.setOnLongClickListener(null)
         parsed?.let {view.display(renderer,it,source,false)}
     })
 }

@@ -1,3 +1,4 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package dev.luma.agent.ui
 
 import androidx.activity.compose.BackHandler
@@ -39,8 +40,8 @@ import kotlin.math.roundToInt
     MotionLazyColumn(Modifier.fillMaxSize().screenMotionBlur(transition).testTag("settings-list"), contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
         item {
             if(visiblePage.isNotEmpty()) TextButton(onClick={page=""}) { Icon(Icons.Outlined.ArrowBack,null);Spacer(Modifier.width(8.dp));Text("Все настройки") }
-            PageTitle("НАСТРОЙКИ",when(visiblePage) {"theme"->"Оформление";"effects"->"Эффекты";"model"->"Параметры модели";"prompt"->"Системный промпт";"agent"->"Управление";else->"Твоя Luma"},
-                when(visiblePage) {"theme"->"Цвета меняются плавно вместе со всем интерфейсом.";"effects"->"Настрой движение, сферу и свечение.";"model"->"Отдельные параметры для каждой выбранной модели.";"prompt"->"Твои инструкции для выбранной модели.";"agent"->"Доступ, подтверждения и пределы задачи.";else->"Всё, что делает помощника твоим."})
+            PageTitle("НАСТРОЙКИ",when(visiblePage) {"theme"->"Оформление";"effects"->"Эффекты";"model"->"Параметры модели";"prompt"->"Системный промпт";"agent"->"Управление";else->"Общие"},
+                when(visiblePage) {"theme"->"Тема, цвета и показ скорости генерации.";"effects"->"Анимации, сфера и свечение во время работы агента.";"model"->"Сохраняются отдельно для каждой модели.";"prompt"->"Инструкции для выбранной модели.";"agent"->"Доступ, подтверждения и пределы задачи.";else->"Внешний вид, модель и работа агента."})
         }
         when(visiblePage) {
             "" -> {
@@ -66,6 +67,16 @@ import kotlin.math.roundToInt
                 item { SoftCard {
                     Text("Чат",style=MaterialTheme.typography.titleMedium)
                     SettingToggle("Скорость генерации","Токены в секунду на вход и выход: в шапке чата, в карточке агента и на кнопке «Стоп»",settings.tokenMeter) {v->graph.update {it.copy(tokenMeter=v)}}
+                    SettingSlider("Размер текста в чате",settings.chatTextScale,.85f..1.4f,"${(settings.chatTextScale*100).roundToInt()} %",steps=10) {v->graph.update {it.copy(chatTextScale=(v*20).roundToInt()/20f)}}
+                    SettingToggle("Вибрация","Короткий отклик при отправке, подтверждении и завершении задачи",settings.haptics) {v->graph.update {it.copy(haptics=v)}}
+                } }
+                item { SoftCard {
+                    Text("Тон общения",style=MaterialTheme.typography.titleMedium)
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        SegmentedButton(!settings.formal,{graph.update {it.copy(tone="friendly")}},SegmentedButtonDefaults.itemShape(0,2),Modifier.testTag("tone-friendly")) {Text("Дружеский",maxLines=1)}
+                        SegmentedButton(settings.formal,{graph.update {it.copy(tone="formal")}},SegmentedButtonDefaults.itemShape(1,2),Modifier.testTag("tone-formal")) {Text("Официальный",maxLines=1)}
+                    }
+                    Text(if(settings.formal) "Luma обращается на «вы», спокойно и по делу — в подсказках и в ответах модели." else "Luma обращается на «ты», по-дружески — в подсказках и в ответах модели.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 } }
                 item { SoftCard {
                     Text("Палитра Luma",style=MaterialTheme.typography.titleMedium)
@@ -77,7 +88,7 @@ import kotlin.math.roundToInt
             }
             "effects" -> {
                 item { SoftCard {
-                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {LumaOrb(Modifier.size(96.dp));Column(Modifier.weight(1f)) {Text("Спутники Luma",style=MaterialTheme.typography.titleMedium);Text("Частицы обходят сферу спереди и сзади.",style=MaterialTheme.typography.bodySmall)}}
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {LumaOrb(Modifier.size(96.dp));Column(Modifier.weight(1f)) {Text("Сфера",style=MaterialTheme.typography.titleMedium);Text("Так она выглядит на пустом экране чата.",style=MaterialTheme.typography.bodySmall)}}
                     SettingToggle("Меньше анимаций","Неподвижная сфера и мгновенные переходы",settings.reducedMotion) {v->graph.update {it.copy(reducedMotion=v)}}
                     SettingToggle("Плавный ввод","Плавное появление букв без задержки клавиатуры",visuals.smoothInput) {v->visual {it.copy(smoothInput=v)}}
                     SettingToggle("Motion blur","Мягкое размытие при прокрутке и смене экранов",visuals.motionBlur) {v->visual {it.copy(motionBlur=v)}}
@@ -89,13 +100,13 @@ import kotlin.math.roundToInt
                     SettingSlider("Количество частиц",visuals.particleCount.toFloat(),36f..180f,visuals.particleCount.toString(),steps=3) {v->visual {it.copy(particleCount=v.roundToInt())}}
                     SettingSlider("Скорость орбит",visuals.orbitSpeed,.4f..2f,"%.1f×".format(visuals.orbitSpeed)) {v->visual {it.copy(orbitSpeed=v)}}
                     SettingSlider("Возврат после вращения",visuals.returnDelay,2f..6f,"%.0f с".format(visuals.returnDelay)) {v->visual {it.copy(returnDelay=v)}}
-                    Text("На главном экране проведи по шару, чтобы вращать его. Удерживай около 7 секунд: орбиты расширяются, скорость плавно приближается к пределу. После отпускания частицы успокаиваются.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Во время управления частицы догоняют шарик-курсор и вращаются вокруг него.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Сферу на пустом экране чата можно вращать пальцем. Если удерживать её около 7 секунд, орбиты расширяются и частицы ускоряются.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Во время работы агента частицы следуют за курсором.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 } }
                 item { SoftCard {
                     Text("Во время управления",style=MaterialTheme.typography.titleMedium)
                     SettingToggle("Шарик-курсор","Показывать точку следующего действия",visuals.cursor) {v->visual {it.copy(cursor=v)}}
-                    SettingToggle("Свечение краёв","Плавающие голубые и фиолетовые переливы",visuals.edgeGlow) {v->visual {it.copy(edgeGlow=v)}}
+                    SettingToggle("Свечение краёв","Цветная рамка по краям экрана во время задачи",visuals.edgeGlow) {v->visual {it.copy(edgeGlow=v)}}
                     if(visuals.edgeGlow) SettingSlider("Яркость свечения",visuals.glowIntensity,.2f..1f,"${(visuals.glowIntensity*100).roundToInt()} %") {v->visual {it.copy(glowIntensity=v)}}
                     Text("Кнопка остановки остаётся доступной при любых настройках эффектов.",style=MaterialTheme.typography.bodySmall)
                 } }
@@ -145,6 +156,11 @@ import kotlin.math.roundToInt
                     SettingSlider("Максимум шагов",settings.maxSteps.toFloat(),5f..30f,settings.maxSteps.toString(),steps=24) {v->graph.update {it.copy(maxSteps=v.roundToInt())}}
                     SettingSlider("Время выполнения",settings.taskMinutes.toFloat(),2f..15f,"${settings.taskMinutes} мин",steps=12) {v->graph.update {it.copy(taskMinutes=v.roundToInt())}}
                     }
+                    // Token limit per task: off, then 50k … 2M. Reaching it pauses the agent.
+                    val limits=listOf(0,50,100,200,500,1000,2000)
+                    val at=limits.indexOfFirst {it>=settings.agentTokenLimit}.let {if(it<0) limits.lastIndex else it}
+                    SettingSlider("Лимит токенов на задачу",at.toFloat(),0f..limits.lastIndex.toFloat(),if(limits[at]==0) "без лимита" else if(limits[at]>=1000) "${limits[at]/1000} млн" else "${limits[at]} тыс.",steps=limits.size-2) {v->graph.update {it.copy(agentTokenLimit=limits[v.roundToInt().coerceIn(0,limits.lastIndex)])}}
+                    Text("Когда задача потратит столько токенов, агент встанет на паузу и спросит, продолжать ли.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("В API передаются задача, заметки, последние 10 действий и текущий результат. Скриншоты — по запросу модели, если разрешены в разделе доступа.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Новые лимиты применяются при следующем запуске. Задачу можно остановить раньше.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 } }

@@ -18,6 +18,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
@@ -35,6 +37,8 @@ internal sealed interface MarkdownSegment {
     data class Text(val markdown: String) : MarkdownSegment
     /** [align]: -1 left, 0 centre, 1 right. */
     data class Table(val header: List<String>, val align: List<Int>, val rows: List<List<String>>) : MarkdownSegment
+    /** A fenced code block; [language] is the word after the fence, possibly empty. */
+    data class Code(val language: String, val code: String) : MarkdownSegment
 }
 
 private val tableSeparator = Regex("""^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$""")
@@ -46,7 +50,7 @@ private fun tableCells(line: String): List<String> {
     return row.split(Regex("""(?<!\\)\|""")).map { it.trim().replace("\\|", "|") }
 }
 
-/** Splits GFM tables out of the reply, never inside fenced code; everything else stays Markdown text. */
+/** Splits GFM tables and fenced code blocks out of the reply; everything else stays Markdown text. */
 internal fun splitMarkdownTables(source: String): List<MarkdownSegment> {
     val lines = source.lines()
     val result = mutableListOf<MarkdownSegment>()
@@ -57,8 +61,18 @@ internal fun splitMarkdownTables(source: String): List<MarkdownSegment> {
     while (i < lines.size) {
         val line = lines[i]
         val trimmed = line.trimStart()
-        if (fence == null && (trimmed.startsWith("```") || trimmed.startsWith("~~~"))) fence = trimmed.take(3)
-        else if (fence != null && trimmed.startsWith(fence)) fence = null
+        if (fence == null && (trimmed.startsWith("```") || trimmed.startsWith("~~~"))) {
+            // An unclosed fence (a cut-off reply) runs to the end.
+            fence = trimmed.takeWhile { it == trimmed[0] }
+            val language = trimmed.drop(fence.length).trim().substringBefore(' ').substringBefore('{')
+            val indent = line.length - trimmed.length
+            val body = StringBuilder()
+            var j = i + 1
+            while (j < lines.size && !(lines[j].trimStart().startsWith(fence) && lines[j].trim().all { it == fence[0] })) {
+                body.append(lines[j].drop(minOf(indent, lines[j].length - lines[j].trimStart().length))).append('\n'); j++
+            }
+            flush(); result += MarkdownSegment.Code(language, body.toString().trimEnd('\n')); fence = null; i = j + 1; continue
+        }
         else if (fence == null && line.contains('|') && i + 1 < lines.size && tableSeparator.matches(lines[i + 1])) {
             val header = tableCells(line)
             val spec = tableCells(lines[i + 1])
@@ -97,7 +111,7 @@ internal fun cellText(raw: String, codeBackground: Color): AnnotatedString = bui
 }
 
 /** Columns as wide as their content (up to 260 dp, then wrapped); a wide table scrolls sideways. */
-@Composable internal fun MarkdownTable(table: MarkdownSegment.Table) {
+@Composable internal fun MarkdownTable(table: MarkdownSegment.Table, onLongPress: (() -> Unit)? = null) {
     val colors = MaterialTheme.colorScheme
     val line = colors.outlineVariant
     val headerFill = colors.surfaceContainerHigh
@@ -105,8 +119,10 @@ internal fun cellText(raw: String, codeBackground: Color): AnnotatedString = bui
     val maxCell = with(LocalDensity.current) { 260.dp.roundToPx() }
     val cells = listOf(table.header) + table.rows
     val shape = RoundedCornerShape(12.dp)
-    SelectionContainer {
-        Box(Modifier.horizontalScroll(rememberScrollState()).testTag("markdown-table").clip(shape).border(1.dp, line, shape)) {
+    // With a message menu the long press belongs to it; text selection is offered there.
+    val press = if (onLongPress != null) Modifier.pointerInput(onLongPress) { detectTapGestures(onLongPress = { onLongPress() }) } else Modifier
+    MaybeSelectable(onLongPress == null) {
+        Box(Modifier.horizontalScroll(rememberScrollState()).testTag("markdown-table").clip(shape).border(1.dp, line, shape).then(press)) {
             Layout(content = {
                 cells.forEachIndexed { r, row ->
                     row.forEachIndexed { c, value ->
@@ -138,4 +154,7 @@ internal fun cellText(raw: String, codeBackground: Color): AnnotatedString = bui
             }
         }
     }
+}
+@Composable private fun MaybeSelectable(selectable: Boolean, content: @Composable () -> Unit) {
+    if (selectable) SelectionContainer { content() } else content()
 }

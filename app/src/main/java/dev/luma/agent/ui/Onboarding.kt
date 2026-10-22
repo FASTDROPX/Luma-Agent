@@ -68,16 +68,16 @@ import dev.luma.agent.AppGraph
                 Text("Привет, я Luma", Modifier.weight(1f).appear(9), style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge)
             }
             Spacer(Modifier.height(if (compact) 16.dp else 28.dp))
-            Text("Твой AI.\nС действиями.", Modifier.fillMaxWidth().appear(13), style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
+            Text("Чат с ИИ\nи помощь на телефоне", Modifier.fillMaxWidth().appear(13), style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
             if (showDescription) {
                 Spacer(Modifier.height(10.dp))
-                Text("Общайся или поручай задачи на телефоне.", Modifier.fillMaxWidth().appear(14), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Вопросы — в чат, действия — агенту.", Modifier.fillMaxWidth().appear(14), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(if (compact) 14.dp else 24.dp))
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                WelcomeFeature(Icons.Outlined.ChatBubbleOutline, "Чат · ответы и идеи", 15)
-                WelcomeFeature(Icons.Outlined.TouchApp, "Агент · экран и файлы", 16)
-                WelcomeFeature(Icons.Outlined.VerifiedUser, "Ты выбираешь доступ", 17)
+                WelcomeFeature(Icons.Outlined.ChatBubbleOutline, "Чат с любой моделью", 15)
+                WelcomeFeature(Icons.Outlined.TouchApp, t("Агент действует за вас"), 16)
+                WelcomeFeature(Icons.Outlined.VerifiedUser, t("Доступ включаете вы"), 17)
             }
         }
     }

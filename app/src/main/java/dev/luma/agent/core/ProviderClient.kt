@@ -64,10 +64,18 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                     val id = if (provider == Provider.GEMINI) row.optString("name").removePrefix("models/") else row.optString("id")
                     if (id.isBlank() || id.length > 240 || id.any { c -> c.isWhitespace() }) continue
                     val lower = id.lowercase()
-                    if (provider == Provider.GEMINI && (!id.startsWith("gemini-") || listOf("image", "tts", "live", "audio", "robotics", "computer-use").any { it in lower } || !contains(row.optJSONArray("supportedGenerationMethods"), "generateContent"))) continue
-                    if (provider == Provider.OPENAI && (listOf("embedding", "whisper", "tts", "realtime", "transcribe", "audio", "moderation", "dall-e", "gpt-image").any { it in lower } || !(lower.startsWith("gpt-") || lower.matches(Regex("o[0-9].*"))))) continue
+                    if (provider == Provider.GEMINI && (!id.startsWith("gemini-") || listOf("tts", "live", "audio", "robotics", "computer-use").any { it in lower } || !contains(row.optJSONArray("supportedGenerationMethods"), "generateContent"))) continue
+                    val openAiPainter = provider == Provider.OPENAI && (lower.startsWith("gpt-image") || lower.startsWith("dall-e"))
+                    if (provider == Provider.OPENAI && !openAiPainter && (listOf("embedding", "whisper", "tts", "realtime", "transcribe", "audio", "moderation", "dall-e", "gpt-image").any { it in lower } || !(lower.startsWith("gpt-") || lower.matches(Regex("o[0-9].*"))))) continue
                     val arch = row.optJSONObject("architecture")
-                    if (provider == Provider.OPENROUTER && arch != null && !contains(arch.optJSONArray("output_modalities"), "text")) continue
+                    val outputs = arch?.optJSONArray("output_modalities")
+                    if (provider == Provider.OPENROUTER && arch != null && !contains(outputs, "text") && !contains(outputs, "image")) continue
+                    val painter = when (provider) {
+                        Provider.GEMINI -> "image" in lower
+                        Provider.OPENAI -> openAiPainter
+                        Provider.OPENROUTER -> contains(outputs, "image")
+                        else -> false
+                    }
                     val vision = when (provider) {
                         Provider.GEMINI, Provider.CLAUDE -> true
                         Provider.OPENROUTER -> contains(arch?.optJSONArray("input_modalities"), "image")
@@ -83,7 +91,7 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                         Provider.OPENAI -> if (id.startsWith("gpt-3")) 4096 else 8192
                         else -> 8192
                     }.let { if (it > 0) minOf(it, 8192) else 8192 }
-                    result += ModelInfo(id, row.optString("displayName", row.optString("display_name", row.optString("name", id))).take(240), vision, limit)
+                    result += ModelInfo(id, row.optString("displayName", row.optString("display_name", row.optString("name", id))).take(240), vision, limit, painter)
                 }
                 page = when (provider) {
                     Provider.GEMINI -> root.optString("nextPageToken")
@@ -108,11 +116,20 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
         onRetry: (Int,Long)->Unit={_,_->}): Generation {
         if (connection.model.isBlank()) throw UserError("Выберите модель в разделе «Подключения».")
         val latestUser=turns.indexOfLast {it.role=="user"}
-        val prepared=turns.mapIndexed {index,turn ->turn.copy(attachments=turn.attachments.map {file ->
-            val reason=unsupportedAttachment(provider,connection,file)
-            if(reason==null) file else if(index==latestUser) throw UserError(reason)
-            else AttachmentData(file.name,"text/plain",text="Ранее приложенный файл недоступен текущей модели. Его содержимое не передано: $reason")
-        })}
+        val painterModel = connection.models.firstOrNull { it.id == connection.model }?.imageOutput == true
+        val painter = !agent && painterModel
+        if (agent && painterModel && provider == Provider.OPENAI) throw UserError("Эта модель только рисует картинки. Для агента выберите текстовую модель.")
+        val prepared=turns.mapIndexed {index,turn ->
+            // Only Gemini accepts pictures in the model's own turns; elsewhere an earlier generated picture becomes a note.
+            val own = turn.role == "assistant" && provider != Provider.GEMINI
+            turn.copy(text = if (turn.role == "assistant" && turn.text.isBlank()) "(изображение)" else turn.text, attachments=turn.attachments.map {file ->
+                if (own && file.text == null) return@map AttachmentData(file.name,"text/plain",text="Ранее созданное изображение ${file.name}")
+                val reason=unsupportedAttachment(provider,connection,file)
+                if(reason==null) file else if(index==latestUser) throw UserError(reason)
+                else AttachmentData(file.name,"text/plain",text="Ранее приложенный файл недоступен текущей модели. Его содержимое не передано: $reason")
+            })
+        }
+        if (painter && provider == Provider.OPENAI) return paintWithOpenAi(connection, prepared, onRetry)
         val base = base(provider, connection); val headers = headers(provider, connection)
         val parameters = connection.generation()
         val modelLimit = connection.models.firstOrNull { it.id == connection.model }?.outputLimit?.coerceIn(256,8192) ?: 8192
@@ -144,10 +161,12 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                 val config = configure(JSONObject().put("maxOutputTokens", outputLimit),true)
                 if (agent) config.put("responseMimeType", "application/json")
                 // Gemini 2.5+ thinks anyway; asking for the thought summary lets the chat show it.
-                if (connection.model.lowercase().contains(Regex("gemini-(2\\.5|[3-9])"))) config.put("thinkingConfig", JSONObject().put("includeThoughts", true))
-                request(WireRequest(base + "models/${connection.model}:streamGenerateContent?alt=sse", headers,
+                if (!painter && connection.model.lowercase().contains(Regex("gemini-(2\\.5|[3-9])"))) config.put("thinkingConfig", JSONObject().put("includeThoughts", true))
+                // Image models answer in one piece (pictures are large); text models stream for the meter.
+                if (painter) config.put("responseModalities", JSONArray().put("TEXT").put("IMAGE"))
+                request(WireRequest(base + "models/${connection.model}:" + (if (painter) "generateContent" else "streamGenerateContent?alt=sse"), headers,
                     JSONObject().put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
-                        .put("contents", contents).put("generationConfig", config), stream = true, format = WireFormat.GEMINI))
+                        .put("contents", contents).put("generationConfig", config), stream = !painter, format = WireFormat.GEMINI))
             }
             Provider.CLAUDE -> {
                 val messages = JSONArray()
@@ -177,11 +196,13 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                 val body = configure(JSONObject().put("model", connection.model).put("messages", messages)
                     .put(if (provider == Provider.OPENAI) "max_completion_tokens" else "max_tokens", outputLimit))
                 if (agent && provider == Provider.DEEPSEEK) body.put("response_format", JSONObject().put("type", "json_object"))
-                body.put("stream", true).put("stream_options", JSONObject().put("include_usage", true))
-                request(WireRequest(base + "chat/completions", headers, body, local = provider == Provider.LOCAL, stream = true, format = WireFormat.OPENAI))
+                if (painter) body.put("modalities", JSONArray().put("image").put("text"))
+                else body.put("stream", true).put("stream_options", JSONObject().put("include_usage", true))
+                request(WireRequest(base + "chat/completions", headers, body, local = provider == Provider.LOCAL, stream = !painter, format = WireFormat.OPENAI))
             }
         }
         var reasoning = ""
+        val images = mutableListOf<GeneratedImage>()
         val raw = when (provider) {
             Provider.GEMINI -> {
                 val candidate = root.optJSONArray("candidates")?.optJSONObject(0) ?: throw UserError("Gemini не вернул ответ. Возможна блокировка содержимого.")
@@ -189,6 +210,9 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                 if (candidate.optString("finishReason") in listOf("SAFETY", "RECITATION", "PROHIBITED_CONTENT")) throw UserError("Провайдер остановил ответ по своим ограничениям.")
                 val parts = candidate.optJSONObject("content")?.optJSONArray("parts") ?: JSONArray()
                 reasoning = (0 until parts.length()).mapNotNull { parts.optJSONObject(it)?.takeIf { p -> p.optBoolean("thought") }?.optString("text") }.joinToString("")
+                for (i in 0 until parts.length()) parts.optJSONObject(i)?.takeUnless { it.optBoolean("thought") }?.optJSONObject("inlineData")?.let { data ->
+                    GeneratedImage.decode(data.optString("mimeType"), data.optString("data"))?.let(images::add)
+                }
                 (0 until parts.length()).mapNotNull { parts.optJSONObject(it)?.takeUnless { p -> p.optBoolean("thought") }?.optString("text") }.joinToString("")
             }
             Provider.CLAUDE -> {
@@ -202,16 +226,32 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                 if (choice.optString("finish_reason") == "length") throw UserError("Ответ обрезан лимитом. Сократите задачу или выберите другую модель.")
                 val message = choice.optJSONObject("message")
                 reasoning = message?.optString("reasoning_content").orEmpty().ifEmpty { message?.optString("reasoning").orEmpty() }
+                message?.optJSONArray("images")?.let { list -> for (i in 0 until list.length()) {
+                    GeneratedImage.fromDataUrl(list.optJSONObject(i)?.optJSONObject("image_url")?.optString("url").orEmpty())?.let(images::add)
+                } }
                 message?.optString("content") ?: ""
             }
         }
         val (answer, inlineThought) = ReplyParts.splitThink(raw)
         if (reasoning.isBlank()) reasoning = inlineThought
-        val text = answer.trim().takeIf { it.isNotEmpty() } ?: throw UserError("Модель вернула пустой ответ.")
+        val text = answer.trim()
+        if (text.isEmpty() && images.isEmpty()) throw UserError("Модель вернула пустой ответ.")
         val format = when (provider) { Provider.GEMINI -> WireFormat.GEMINI; Provider.CLAUDE -> WireFormat.CLAUDE; else -> WireFormat.OPENAI }
         val stats = ReplyParts.stats(format, root, text, reasoning)
         if (stats != null) mutableStats.value = stats
-        return Generation(text, reasoning.trim(), stats)
+        return Generation(text, reasoning.trim(), stats, images)
+    }
+    /** OpenAI image models live behind the images endpoint; the latest user message is the prompt. */
+    private suspend fun paintWithOpenAi(connection: Connection, turns: List<Turn>, onRetry: (Int,Long)->Unit): Generation {
+        val prompt = turns.lastOrNull { it.role == "user" }?.text?.take(4000).orEmpty().ifBlank { throw UserError("Опишите, что нарисовать.") }
+        val body = JSONObject().put("model", connection.model).put("prompt", prompt).put("n", 1).put("size", "1024x1024")
+        if (connection.model.lowercase().startsWith("dall-e")) body.put("response_format", "b64_json")
+        val root = send(WireRequest(Provider.OPENAI.base + "images/generations", headers(Provider.OPENAI, connection), body), onRetry)
+        val item = root.optJSONArray("data")?.optJSONObject(0) ?: throw UserError("Модель не вернула изображение.")
+        val image = GeneratedImage.decode("image/png", item.optString("b64_json")) ?: throw UserError("Модель не вернула изображение.")
+        val stats = root.optJSONObject("_luma")?.let { TokenStats(0, root.optJSONObject("usage")?.optInt("output_tokens", 0) ?: 0, 0, it.optLong("totalMs")) }
+        if (stats != null) mutableStats.value = stats
+        return Generation(item.optString("revised_prompt").trim(), "", stats, listOf(image))
     }
     private fun base(provider: Provider, c: Connection) = if (provider == Provider.LOCAL) validateEndpoint(c.endpoint) else provider.base
     private fun unsupportedAttachment(provider: Provider,connection: Connection,file: AttachmentData): String? = when {
@@ -273,11 +313,11 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                                 }
                                 assembler.result()
                             } else {
-                                if (body.contentLength() > 8_000_000) throw UserError("Ответ сервиса слишком большой.")
+                                if (body.contentLength() > 24_000_000) throw UserError("Ответ сервиса слишком большой.")
                                 val out = java.io.ByteArrayOutputStream()
                                 body.byteStream().use { input ->
                                     val buffer = ByteArray(16_384)
-                                    while (true) { val count = input.read(buffer); if (count < 0) break; if (out.size() + count > 8_000_000) throw UserError("Ответ сервиса слишком большой."); out.write(buffer, 0, count) }
+                                    while (true) { val count = input.read(buffer); if (count < 0) break; if (out.size() + count > 24_000_000) throw UserError("Ответ сервиса слишком большой."); out.write(buffer, 0, count) }
                                 }
                                 val json = runCatching { JSONObject(out.toString(Charsets.UTF_8.name())) }.getOrElse { throw UserError("Сервис вернул ответ в неизвестном формате.") }
                                 if (wire.catalog) json else json.put("_luma", JSONObject().put("totalMs", ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(1)))
@@ -299,7 +339,7 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
         private fun contains(array: JSONArray?, value: String) = array != null && (0 until array.length()).any { array.optString(it) == value }
         internal fun httpError(code: Int,retryAfter: String?=null): UserError = ProviderFailure(code,
             retryAfter?.toLongOrNull()?.coerceIn(0,8)?.times(1000) ?: 0,when (code) {
-            400 -> "Сервис отклонил запрос. Проверьте модель, поддержку изображений и её параметры. Если меняли температуру или лимит, попробуйте сбросить параметры модели."
+            400 -> "Сервис отклонил запрос. Проверьте модель, поддержку изображений и её параметры. Если температура или лимит были изменены, попробуйте сбросить параметры модели."
             401 -> "API-ключ недействителен. Замените его в подключениях."
             402 -> "Недостаточно средств на аккаунте провайдера."
             403 -> "Доступ запрещён. Проверьте права ключа и доступность сервиса в вашем регионе."

@@ -24,6 +24,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.*
@@ -74,8 +76,10 @@ import kotlin.math.roundToInt
     val keyboard=LocalSoftwareKeyboardController.current
     val context=LocalContext.current
     val rootView=LocalView.current
+    val clipboard=LocalClipboardManager.current
     val scope=rememberCoroutineScope()
-    val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) {uris ->
+    val shared by graph.sharedContent.collectAsStateWithLifecycle()
+    fun importUris(uris: List<android.net.Uri>) {
         val chat=graph.chats.selected.value
         if(uris.isNotEmpty()) scope.launch {
             importing=true
@@ -91,7 +95,21 @@ import kotlin.math.roundToInt
             finally {importing=false}
         }
     }
+    val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) {importUris(it)}
+    // Share → Luma: the text goes into the field, files and pictures become attachments.
+    LaunchedEffect(shared,selected) {
+        val content=shared ?: return@LaunchedEffect
+        graph.sharedContent.value=null
+        if(content.text.isNotBlank()) {val text=(input.text+(if(input.text.isBlank()) "" else "\n")+content.text).take(12_000);input=TextFieldValue(text,TextRange(text.length))}
+        importUris(content.uris)
+    }
     DisposableEffect(graph) {onDispose {graph.orbAnchor=null}}
+    // Short vibrations: a task finishes, an error arrives.
+    val haptics=settings.haptics
+    var wasRunning by remember {mutableStateOf(run.active)}
+    LaunchedEffect(run.active) {if(wasRunning && !run.active) rootView.haptic(if(run.error!=null) Haptic.Error else Haptic.Finish,haptics);wasRunning=run.active}
+    val lastFailed=messages.lastOrNull()?.takeIf {it.failed}?.id
+    LaunchedEffect(lastFailed) {if(lastFailed!=null && System.currentTimeMillis()-(messages.lastOrNull()?.timestamp ?: 0)<5000) rootView.haptic(Haptic.Error,haptics)}
     val relevantRun=run.active && run.chatId==selected
     val pending=busy && !run.active && messages.lastOrNull()?.role!="assistant"
     val latestAnswer=messages.lastOrNull {it.role=="assistant"}?.id
@@ -122,7 +140,7 @@ import kotlin.math.roundToInt
         if(importing || (input.text.isBlank() && files.isEmpty())) return
         if(!graph.send(input.text,asAgent,files)) return
         val preview=input.text.ifBlank {files.joinToString {it.name}}
-        sentPreview=preview.substring(0,revealBoundary(preview,minOf(90,preview.length)));sendTick++;follow=true
+        sentPreview=preview.substring(0,revealBoundary(preview,minOf(90,preview.length)));sendTick++;follow=true;rootView.haptic(Haptic.Send,settings.haptics)
         input=TextFieldValue("");files=emptyList();keyboard?.hide()
     }
     Column(Modifier.fillMaxSize()) {
@@ -137,23 +155,33 @@ import kotlin.math.roundToInt
                 }) {prompt,agent ->asAgent=agent;input=TextFieldValue(prompt,TextRange(prompt.length))}
             } else {
                 MotionLazyColumn(Modifier.fillMaxSize().testTag("chat-thread"),state=list,contentPadding=PaddingValues(start=16.dp,end=16.dp,top=12.dp,bottom=22.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
-                    // Items only fade in: a fade-out on the list's last item could stay drawn after removal.
+                    // Chat text appears instantly (no fades); a fade-out on the last item could also stay drawn after removal.
                     items(messages,key={"message-${it.id}"}) {message ->
                         val animate=remember(message.id) {message.role=="assistant" && message.timestamp>=openedAt && revealed.add(message.id)}
-                        Box(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(260),placementSpec=if(reduced) null else spring(stiffness=Spring.StiffnessMediumLow),fadeOutSpec=null)) {
-                            MessageBubble(message,animate,graph.chats.attachments,onCursor={y->if(message.id==latestAnswer && !pending && !relevantRun) answer=Offset(left,y-origin.y)},onGrowth={scrollEvents.trySend(Unit)})
+                        Box(Modifier.animateItem(fadeInSpec=null,placementSpec=if(reduced) null else spring(stiffness=Spring.StiffnessMediumLow),fadeOutSpec=null)) {
+                            val idle=!busy && !run.active
+                            val chat=selected
+                            val actions=if(message.role=="tool" || chat==null) null else MessageActions(
+                                copy={clipboard.setText(androidx.compose.ui.text.AnnotatedString(message.text))},
+                                share={val picture=message.attachments.firstOrNull();if(message.text.isBlank() && picture!=null) shareFile(context,graph.chats.attachments,picture) else shareText(context,message.text)},
+                                delete={graph.deleteMessage(message.id)},
+                                repeat=if(message.role=="user" && idle) {{if(graph.send(message.text,false,message.attachments)) {follow=true;rootView.haptic(Haptic.Send,settings.haptics)}}} else null,
+                                regenerate=if(message.role=="assistant" && !message.failed && message.id==latestAnswer && idle) {{graph.regenerate(chat,message.id)}} else null)
+                            val retry=if(message.failed && message.id==messages.lastOrNull()?.id && idle && chat!=null) {{graph.regenerate(chat,message.id)}} else null
+                            MessageBubble(message,animate,graph.chats.attachments,actions,retry,onCursor={y->if(message.id==latestAnswer && !pending && !relevantRun) answer=Offset(left,y-origin.y)},onGrowth={scrollEvents.trySend(Unit)})
                         }
                     }
                     if(pending) item(key="thinking") {
-                        Row(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(220),placementSpec=null,fadeOutSpec=null).fillMaxWidth().heightIn(min=48.dp).padding(start=52.dp).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+it.size.height/2f)},verticalAlignment=Alignment.CenterVertically) {
+                        Row(Modifier.animateItem(fadeInSpec=null,placementSpec=null,fadeOutSpec=null).fillMaxWidth().heightIn(min=48.dp).padding(start=52.dp).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+it.size.height/2f)},verticalAlignment=Alignment.CenterVertically) {
                             val elapsed=rememberElapsed(chatStartedAt)
                             Text("Готовлю ответ…",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                             if(elapsed>=1000) Text("  ${dev.luma.agent.core.formatElapsed(elapsed)}",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f))
                         }
                     }
                     if(relevantRun) item(key="agent") {
-                        Box(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(260),placementSpec=if(reduced) null else spring(stiffness=Spring.StiffnessMediumLow),fadeOutSpec=null).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+with(density) {38.dp.toPx()})}) {
-                            RunCard(run,approve={scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},elapsed=rememberElapsed(run.startedAt),stats=tokenStats.takeIf {settings.tokenMeter},meterActive=settings.tokenMeter)
+                        Box(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(260),placementSpec=if(reduced) null else spring(stiffness=Spring.StiffnessMediumLow),fadeOutSpec=null)) {
+                            RunCard(run,approve={rootView.haptic(Haptic.Confirm,settings.haptics);scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},elapsed=rememberElapsed(run.startedAt),stats=tokenStats.takeIf {settings.tokenMeter},meterActive=settings.tokenMeter,
+                                orbSlot=Modifier.onGloballyPositioned {c ->answer=c.positionInRoot()+Offset(c.size.width/2f,c.size.height/2f)-origin})
                         }
                     }
                     item(key="tail") {Spacer(Modifier.height(4.dp))}
@@ -205,7 +233,7 @@ import kotlin.math.roundToInt
                         Modifier.weight(1f).heightIn(min=44.dp).padding(vertical=11.dp).then(wipe.modifier).testTag("chat-input"),
                         textStyle=MaterialTheme.typography.bodyLarge.copy(color=MaterialTheme.colorScheme.onSurface),maxLines=4,
                         visualTransformation=smoothInput(input),onTextLayout={wipe.layout=it},cursorBrush=SolidColor(MaterialTheme.colorScheme.primary),decorationBox={field ->
-                            Box {if(input.text.isEmpty()) Text(if(asAgent) "Какую задачу выполнить?" else "Напиши сообщение…",style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f),maxLines=1,overflow=TextOverflow.Ellipsis);field()}
+                            Box {if(input.text.isEmpty()) Text(if(asAgent) "Какую задачу выполнить?" else t("Напиши сообщение…"),style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f),maxLines=1,overflow=TextOverflow.Ellipsis);field()}
                         })
                     GradientActionButton(busy || run.active,!importing && (input.text.isNotBlank() || files.isNotEmpty()),sendTick,::submit,diameter=44.dp)
                 }
@@ -223,20 +251,26 @@ import kotlin.math.roundToInt
         val orbSize = (maxHeight * .30f).coerceAtMost(156.dp)
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)) {
             // Decorative content gives way first on a short screen or with a keyboard.
-            if (room >= 230.dp) orbSlot(Modifier.size(orbSize))
-            if (room >= 135.dp) Text("Привет, я Luma", Modifier.appear(1), style = MaterialTheme.typography.titleLarge)
-            if (room >= 330.dp) Text("Что сделаем сегодня?", Modifier.appear(2), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (needsModel && room >= 110.dp) Surface(onClick = connect, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth().testTag("chat-connect").appear(3)) {
+            // The sphere fills only the middle of its square; trim the empty top and bottom from the
+            // layout (not the drawing) so the greeting sits right under the sphere as one centred group.
+            if (room >= 230.dp) orbSlot(Modifier.size(orbSize).layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val trim = (placeable.height * .13f).roundToInt()
+                layout(placeable.width, placeable.height - 2 * trim) { placeable.place(0, -trim) }
+            })
+            if (room >= 135.dp) Text("Привет, я Luma", style = MaterialTheme.typography.titleLarge)
+            if (room >= 330.dp) Text(t("Напишите вопрос или поручите задачу"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (needsModel && room >= 110.dp) Surface(onClick = connect, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth().testTag("chat-connect")) {
                 Row(Modifier.heightIn(min = 52.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(20.dp))
-                    Text("Подключить AI", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                    Text("Подключить модель", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                     Icon(Icons.Outlined.ArrowForward, null, Modifier.size(20.dp))
                 }
             }
             if (room >= 160.dp) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Suggestion(Modifier.weight(1f).testTag("suggest-idea").appear(4), if (icons) Icons.Outlined.Lightbulb else null, "Идея") { select("Помоги придумать необычную идею для проекта", false) }
-                Suggestion(Modifier.weight(1f).testTag("suggest-app").appear(5), if (icons) Icons.Outlined.Apps else null, "Открыть") { select("Найди и открой приложение ", true) }
-                Suggestion(Modifier.weight(1f).testTag("suggest-files").appear(6), if (icons) Icons.Outlined.FolderOpen else null, "Файлы") { select("Покажи, что есть в выбранной папке", true) }
+                Suggestion(Modifier.weight(1f).testTag("suggest-idea"), if (icons) Icons.Outlined.Lightbulb else null, "Идея") { select("Помоги придумать необычную идею для проекта", false) }
+                Suggestion(Modifier.weight(1f).testTag("suggest-app"), if (icons) Icons.Outlined.Apps else null, "Открыть") { select("Найди и открой приложение ", true) }
+                Suggestion(Modifier.weight(1f).testTag("suggest-files"), if (icons) Icons.Outlined.FolderOpen else null, "Файлы") { select("Покажи, что есть в выбранной папке", true) }
             }
         }
     }
@@ -250,43 +284,66 @@ import kotlin.math.roundToInt
         }
     }
 }
-@Composable private fun MessageBubble(message: ChatMessage,animate: Boolean,files: AttachmentStore,onCursor: (Float)->Unit,onGrowth: ()->Unit) {
+@OptIn(ExperimentalFoundationApi::class)
+@Composable private fun MessageBubble(message: ChatMessage,animate: Boolean,files: AttachmentStore,actions: MessageActions?,retry: (()->Unit)?,onCursor: (Float)->Unit,onGrowth: ()->Unit) {
+    var menu by remember(message.id) {mutableStateOf(false)}
+    var selecting by remember(message.id) {mutableStateOf(false)}
+    val view=LocalView.current;val haptics=LocalHaptics.current
+    val openMenu: (()->Unit)?=actions?.let {{view.haptic(Haptic.Confirm,haptics);menu=true}}
+    if(selecting) SelectTextDialog(message.text) {selecting=false}
+    val scale=LocalChatTextScale.current
     if(message.role=="tool") {
         Row(Modifier.fillMaxWidth().padding(start=52.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {Icon(Icons.Outlined.CheckCircleOutline,null,Modifier.size(16.dp),tint=MaterialTheme.colorScheme.secondary);Text(message.text,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+    } else if(message.failed) {
+        Box(Modifier.fillMaxWidth().padding(start=52.dp)) {FailedReply(message,retry!=null,retry ?: {},actions?.delete ?: {})}
     } else if(message.role=="user") {
-        Row(Modifier.fillMaxWidth().appear(),horizontalArrangement=Arrangement.End) {
-            Surface(Modifier.widthIn(max=320.dp),shape=RoundedCornerShape(24.dp,24.dp,7.dp,24.dp),color=MaterialTheme.colorScheme.primaryContainer.copy(alpha=.65f)) {
-                Column(Modifier.padding(horizontal=18.dp,vertical=13.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                    if(message.attachments.isNotEmpty()) AttachmentStrip(message.attachments,files)
-                    if(message.text.isNotBlank()) SelectionContainer {Text(message.text,style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onPrimaryContainer)}
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {
+            Box {
+                val shape=RoundedCornerShape(24.dp,24.dp,7.dp,24.dp)
+                Surface(Modifier.widthIn(max=320.dp).clip(shape).combinedClickable(onClick={},onLongClick=openMenu).testTag("user-${message.id}"),shape=shape,color=MaterialTheme.colorScheme.primaryContainer.copy(alpha=.65f)) {
+                    Column(Modifier.padding(horizontal=18.dp,vertical=13.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                        if(message.attachments.isNotEmpty()) AttachmentStrip(message.attachments,files)
+                        if(message.text.isNotBlank()) Text(message.text,style=MaterialTheme.typography.bodyLarge.let {it.copy(fontSize=it.fontSize*scale,lineHeight=it.lineHeight*scale)},color=MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
                 }
+                actions?.let {MessageMenu(menu,{menu=false},it,user=true,select=if(message.text.isNotBlank()) {{selecting=true}} else null)}
             }
         }
     } else {
-        // A new answer arrives whole and fades in as a block; text is never revealed letter by letter.
-        Column(Modifier.fillMaxWidth().padding(start=52.dp).then(if(animate) Modifier.appear() else Modifier).testTag("reply-${message.id}"),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-            Text("Luma",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
-            if(message.reasoning.isNotBlank()) ThinkingBlock(message.reasoning,message.stats)
-            MarkdownContent(message.text,Modifier.fillMaxWidth(),onCursor=onCursor,onGrowth=onGrowth)
-            AnswerActions(message)
+        // A new answer is shown whole and at once: no reveal, no fade.
+        val pictures=message.attachments.filter {it.mime.startsWith("image/")}
+        val other=message.attachments.filterNot {it.mime.startsWith("image/")}
+        Box(Modifier.fillMaxWidth().padding(start=52.dp)) {
+            Column(Modifier.fillMaxWidth().testTag("reply-${message.id}"),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                Text("Luma",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
+                if(message.reasoning.isNotBlank()) ThinkingBlock(message.reasoning,message.stats)
+                if(pictures.isNotEmpty()) GeneratedImages(pictures,files)
+                if(other.isNotEmpty()) AttachmentStrip(other,files)
+                if(message.text.isNotBlank()) MarkdownContent(message.text,Modifier.fillMaxWidth(),onCursor=onCursor,onGrowth=onGrowth,onLongPress=openMenu)
+                AnswerActions(message,more=openMenu)
+            }
+            actions?.let {MessageMenu(menu,{menu=false},it,user=false,select=if(message.text.isNotBlank()) {{selecting=true}} else null)}
         }
     }
 }
 @Composable fun Thinking(label: String) {Text(label,Modifier.padding(8.dp),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)}
 @Composable fun RunCard(run: RunState, approve: () -> Unit, reject: () -> Unit, pause: () -> Unit, stop: () -> Unit, maxSteps: Int = 20,retry: ()->Unit={},
-    elapsed: Long = 0, stats: dev.luma.agent.core.TokenStats? = null, meterActive: Boolean = false) {
+    elapsed: Long = 0, stats: dev.luma.agent.core.TokenStats? = null, meterActive: Boolean = false, orbSlot: Modifier = Modifier) {
     SoftCard(Modifier.animateContentSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Spacer(Modifier.size(30.dp))
+            // The chat orb (44 dp) is drawn over this slot, so it and its particles stay inside the card.
+            Spacer(orbSlot.size(44.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) { Text(if (run.approval != null) "Нужно подтверждение" else if (run.paused) "Агент на паузе" else "Luma работает", style = MaterialTheme.typography.titleSmall); Text((if(maxSteps==0) "Шаг ${run.step} · без лимита" else "Шаг ${run.step} из $maxSteps") + " · ${dev.luma.agent.core.formatElapsed(elapsed)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("run-timer"))
                 if (meterActive) TokenMeter(stats, run.active && run.approval == null && !run.paused, Modifier.offset(x = (-6).dp)) }
             IconButton(onClick = stop) { Icon(Icons.Outlined.StopCircle, "Остановить") }
         }
         AnimatedContent(run.approval?.title ?: run.stage, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(120)) }, label = "run stage") { stage ->
-            Text(stage, style = MaterialTheme.typography.bodyMedium)
+            Text(t(stage), style = MaterialTheme.typography.bodyMedium)
         }
+        if (run.approval == null) RunLog(run.log)
         run.approval?.let { approval ->
-            Text(approval.details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(t(approval.details), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (approval.background) Text("После разрешения Luma свернётся и продолжит действие в предыдущем приложении.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = approve, modifier = Modifier.weight(1f)) { Text("Разрешить") }; OutlinedButton(onClick = reject, modifier = Modifier.weight(1f)) { Text("Отменить") } }
         } ?: if(run.retryPending) Button(onClick=retry,modifier=Modifier.fillMaxWidth()) {Icon(Icons.Outlined.Refresh,null);Spacer(Modifier.width(8.dp));Text("Повторить запрос")}
@@ -295,16 +352,17 @@ import kotlin.math.roundToInt
 }
 
 /** Copy plus a quiet footnote: generation speed and total time of this answer, when known. */
-@Composable private fun AnswerActions(message: ChatMessage) {
+@Composable private fun AnswerActions(message: ChatMessage,more: (()->Unit)?) {
     val clipboard=LocalClipboardManager.current
     var copied by remember(message.id) {mutableStateOf(false)}
     LaunchedEffect(copied) {if(copied) {delay(1600);copied=false}}
     Row(Modifier.offset(x=(-10).dp),verticalAlignment=Alignment.CenterVertically) {
-        IconButton(onClick={clipboard.setText(androidx.compose.ui.text.AnnotatedString(message.text));copied=true},Modifier.size(36.dp).testTag("copy-${message.id}")) {
+        if(message.text.isNotBlank()) IconButton(onClick={clipboard.setText(androidx.compose.ui.text.AnnotatedString(message.text));copied=true},Modifier.size(36.dp).testTag("copy-${message.id}")) {
             Crossfade(copied,animationSpec=tween(180),label="copied") {done ->
                 Icon(if(done) Icons.Outlined.Check else Icons.Outlined.ContentCopy,if(done) "Скопировано" else "Копировать ответ",Modifier.size(17.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if(more!=null) IconButton(onClick=more,Modifier.size(36.dp).testTag("more-${message.id}")) {Icon(Icons.Outlined.MoreHoriz,"Ещё",Modifier.size(18.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)}
         message.stats?.let {stats ->
             val parts=listOfNotNull(stats.outputPerSecond?.let {"↓ ${dev.luma.agent.core.formatRate(it)} т/с"},stats.totalMs.takeIf {it>0}?.let {"%.1f с".format(java.util.Locale.ROOT,it/1000.0).replace('.',',')})
             if(parts.isNotEmpty()) Text(parts.joinToString(" · "),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.75f))

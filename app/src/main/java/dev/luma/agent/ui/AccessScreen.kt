@@ -65,12 +65,12 @@ import dev.luma.agent.*
     }
     if (onboarding) CompactAccess(graph, connected, notificationsAllowed, { explanation = true }, { folder.launch(null) }, requestNotification, addTile)
     else MotionLazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { PageTitle("ДОСТУП", "Ты управляешь доступом", "Для обычного чата разрешения не нужны. Включи только возможности, которые понадобятся агенту.") }
+        item { PageTitle("ДОСТУП", "Разрешения агента", "Обычному чату они не нужны. Включайте только то, что понадобится агенту.") }
         item {
             AccessCard(Icons.Outlined.TouchApp, "Управление экраном", if (connected) "Luma подключена к специальным возможностям" else "Чтение элементов, нажатия, прокрутка и ввод текста", connected, if (connected) "Настройки службы" else "Как включить") { explanation = true }
         }
         item {
-            AccessCard(Icons.Outlined.FolderOpen, "Выбранная папка", if (settings.folder.isBlank()) "Доступ только к папке, которую выберешь ты" else "Папка: ${Uri.parse(settings.folder).lastPathSegment?.substringAfter(':').orEmpty()}", settings.folder.isNotBlank(), if (settings.folder.isBlank()) "Выбрать папку" else "Изменить папку") { folder.launch(null) }
+            AccessCard(Icons.Outlined.FolderOpen, "Выбранная папка", if (settings.folder.isBlank()) "Агент видит только выбранную папку" else "Папка: ${Uri.parse(settings.folder).lastPathSegment?.substringAfter(':').orEmpty()}", settings.folder.isNotBlank(), if (settings.folder.isBlank()) "Выбрать папку" else "Изменить папку") { folder.launch(null) }
             if (settings.folder.isNotBlank()) TextButton(onClick = {
                 graph.agent.stop("Доступ к папке отключён.")
                 runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(settings.folder), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
@@ -99,7 +99,7 @@ import dev.luma.agent.*
     }
     if (explanation) AlertDialog(onDismissRequest = { explanation = false }, icon = { Icon(Icons.Outlined.AccessibilityNew, null) }, title = { Text("Включить управление") }, text = {
         Column(Modifier.motionScroll(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("1. Открой «Специальные возможности».\n\n2. Найди «Luma · управление телефоном» в установленных службах.\n\n3. Прочитай системное описание и включи службу.")
+            Text(t("1. Открой «Специальные возможности».\n\n2. Найди «Luma · управление телефоном» в установленных службах.\n\n3. Прочитай системное описание и включи службу."))
             Text("Luma сможет читать доступные элементы экрана и выполнять запущенные тобой задачи. Отключить службу можно там же.", style = MaterialTheme.typography.bodySmall)
             if (Build.VERSION.SDK_INT >= 33) {
                 TextButton(onClick = { restrictedHelp = !restrictedHelp }) { Text("Если Android запрещает включение") }

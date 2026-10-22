@@ -25,7 +25,7 @@ data class Attachment(val id: String,val name: String,val mime: String,val size:
         fun encode(items: List<Attachment>)=JSONArray(items.map {it.json()}).toString()
         fun decode(raw: String): List<Attachment> = runCatching {
             val a=JSONArray(raw)
-            (0 until minOf(a.length(),4)).map {i -> val j=a.getJSONObject(i);Attachment(j.getString("id"),j.getString("name"),j.getString("mime"),j.getLong("size"))}
+            (0 until minOf(a.length(),8)).map {i -> val j=a.getJSONObject(i);Attachment(j.getString("id"),j.getString("name"),j.getString("mime"),j.getLong("size"))}
                 .filter {it.id.matches(Regex("[a-f0-9-]{36}"))}
         }.getOrDefault(emptyList())
     }

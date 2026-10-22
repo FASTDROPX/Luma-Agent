@@ -52,12 +52,14 @@ internal class FloatingPanel(private val service: AgentAccessibilityService, pri
             contentDescription = "Luma: ${current.stage}"
         }
         val header = TextView(service).apply {
-            text = if (!expanded) "✦" else headerText()
+            // Collapsed, the panel still shows progress: "✦ 3" is the current step.
+            text = if (!expanded) (if (current.step > 0) "✦ ${current.step}" else "✦") else headerText()
             textSize = if (expanded) 15f else 20f; setTextColor(0xffd9defa.toInt()); gravity = Gravity.CENTER
             setTypeface(Typeface.DEFAULT, Typeface.BOLD); minHeight = dp(48); minWidth = dp(48)
         }
         this.header = header
-        root.addView(header, LinearLayout.LayoutParams(if (expanded) -1 else dp(48), dp(if (expanded) 40 else 48)))
+        root.addView(header, LinearLayout.LayoutParams(if (expanded) -1 else -2, dp(if (expanded) 40 else 48)))
+        if (!expanded) header.setPadding(dp(12), 0, dp(12), 0)
         header.setOnClickListener { expanded = !expanded; render() }
         var startX = 0f; var startY = 0f; var originalX = 0; var originalY = 0; var dragged = false
         header.setOnTouchListener { target, event ->
@@ -87,7 +89,7 @@ internal class FloatingPanel(private val service: AgentAccessibilityService, pri
         }
         root.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
         remove(); view = root
-        params.width = if (expanded) dp(280) else dp(48); params.height = -2
+        params.width = if (expanded) dp(280) else -2; params.height = -2
         params.x = params.x.coerceIn(0, (service.resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0))
         runCatching { manager.addView(root, params) }.onFailure { view = null }
     }

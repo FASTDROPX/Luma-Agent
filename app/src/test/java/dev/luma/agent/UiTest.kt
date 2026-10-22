@@ -42,13 +42,13 @@ class UiTest {
     @After fun teardown(){graph.scope.coroutineContext[kotlinx.coroutines.Job]?.cancel();TestKeys.restore()}
     @Test fun onboardingExplainsAppAndOffersExplicitClipboardAction() {
         compose.setContent{AppRoot(graph)}
-        compose.onNodeWithText("Твой AI.\nС действиями.").assertIsDisplayed()
+        compose.onNodeWithText("Чат с ИИ\nи помощь на телефоне").assertIsDisplayed()
         screenshot("01-welcome-dark")
         compose.onNodeWithText("Настроить доступ").performClick()
         compose.onNodeWithText("Доступ для агента").assertIsDisplayed()
         screenshot("02-permissions-dark")
         compose.onNodeWithText("Подключить модель").performClick()
-        compose.onNodeWithText("Подключение AI").assertIsDisplayed()
+        compose.onNodeWithText("Подключение модели").assertIsDisplayed()
         compose.onNodeWithContentDescription("Вставить из буфера").assertIsDisplayed()
         compose.onNodeWithText("Сохранить ключ").assertIsDisplayed()
         screenshot("02-connect-dark")
@@ -58,8 +58,8 @@ class UiTest {
         compose.setContent { val density=LocalDensity.current; CompositionLocalProvider(LocalDensity provides Density(density.density,1.3f)) { AppRoot(graph) } }
         screenshot("07-small-welcome-130")
         contained("setup-next","setup")
-        containedText("Твой AI.\nС действиями.","setup-welcome")
-        containedText("Ты выбираешь доступ","setup-welcome")
+        containedText("Чат с ИИ\nи помощь на телефоне","setup-welcome")
+        containedText("Доступ включаешь ты","setup-welcome")
         screenshot("07-small-welcome-130")
         compose.onNodeWithTag("setup-next").performClick()
         listOf("setup-screen-access","setup-folder-access","setup-notification-access","setup-access-options").forEach { contained(it,"setup-access") }
@@ -123,7 +123,7 @@ class UiTest {
         compose.onNodeWithText("Привет, я Luma").assertExists()
         screenshot("03-chat-dark")
         compose.onNodeWithText("Доступ",useUnmergedTree=true).performClick()
-        compose.onNodeWithText("Ты управляешь доступом").assertExists()
+        compose.onNodeWithText("Разрешения агента").assertExists()
         compose.onNodeWithText("Как включить").performClick()
         compose.onNodeWithText("Включить управление").assertExists()
         compose.onNodeWithText("Позже").performClick()
@@ -142,7 +142,7 @@ class UiTest {
         compose.onNodeWithText("Модель").performScrollTo()
         screenshot("06-models-light")
         compose.onNodeWithText("Gemini · пример").performClick()
-        compose.onNodeWithText("Выберите модель").assertExists()
+        compose.onNodeWithText("Выбери модель").assertExists()
         compose.onNodeWithText("Другая модель").performClick()
         compose.waitUntil(5000){graph.vault.state.value.connection().model=="gemini-other"}
     }
@@ -162,7 +162,7 @@ class UiTest {
         screenshot("15-intro-settled")
         assertTrue("Icon did not move from the right: $start -> $end",start>end+30.dp)
         compose.onNodeWithText("Привет, я Luma").assertIsDisplayed()
-        containedText("Ты выбираешь доступ","setup-welcome")
+        containedText("Доступ включаешь ты","setup-welcome")
         compose.mainClock.autoAdvance=true
     }
     @Test fun huggingFaceCatalogOffersSizedFilesAndExplicitWifiDownloadConfirmation() {
@@ -269,7 +269,7 @@ class UiTest {
         compose.onNodeWithTag("settings-list").performScrollToNode(hasText("Все настройки"))
         compose.onNodeWithText("Все настройки").performClick()
         compose.onNodeWithText("Оформление").performClick()
-        compose.onNodeWithText("Лаванда").performScrollTo().performClick()
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasText("Лаванда"));compose.onNodeWithText("Лаванда").performClick()
         compose.waitUntil(5000) {!graph.vault.state.value.dynamicColors && graph.vault.state.value.visuals.palette=="lilac"}
         screenshot("23-settings-palette")
         compose.onNodeWithTag("settings-list").performScrollToNode(hasText("Все настройки"));compose.onNodeWithText("Все настройки").performClick()
@@ -438,6 +438,19 @@ class UiTest {
         compose.onNodeWithText("Сначала подумаю, потом отвечу.").assertExists()
         screenshot("32-reply-whole-with-thinking")
         compose.mainClock.autoAdvance=true
+    }
+
+    @Test fun agentCardHoldsTheOrbSlotInsideItsEdges() {
+        val run=RunState(active=true,step=1,stage="Обдумываю следующий шаг",startedAt=android.os.SystemClock.elapsedRealtime()-4000)
+        compose.setContent {LumaTheme(AppSettings(theme="dark",dynamicColors=false,reducedMotion=true)) {Surface(Modifier.fillMaxSize()) {
+            Box(Modifier.padding(16.dp).testTag("run-card")) {RunCard(run,{},{},{},{},maxSteps=0,elapsed=4000,meterActive=true,orbSlot=Modifier.testTag("orb-slot"))}
+        }}}
+        val card=compose.onNodeWithTag("run-card").getUnclippedBoundsInRoot()
+        val slot=compose.onNodeWithTag("orb-slot").getUnclippedBoundsInRoot()
+        // The 44 dp orb is drawn over this slot: it must sit inside the card with room for its particles.
+        assertEquals(44.dp,slot.right-slot.left)
+        assertTrue("Slot $slot leaves the card $card",slot.left>=card.left+12.dp && slot.top>=card.top+12.dp)
+        screenshot("41-agent-card-orb-slot")
     }
 
     @Test fun holdingFingerStillLetsMotionBlurFadeBeforeTheGestureEnds() {

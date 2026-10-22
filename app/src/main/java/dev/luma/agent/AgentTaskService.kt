@@ -31,7 +31,7 @@ class AgentTaskService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("agent", "Работа агента", NotificationManager.IMPORTANCE_LOW))
         val notification = notification(RunState(stage = "Подготавливаю задачу"))
         if (Build.VERSION.SDK_INT >= 34) startForeground(11, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(11, notification)
-        graph.agent.start(chat, goal) { completed = true; stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId) }
+        graph.agent.start(chat, goal) { completed = true; notifyFinished(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId) }
         watcher = scope.launch { graph.agent.state.collect { state ->
             if (state.active && (Build.VERSION.SDK_INT < 33 || checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED))
                 getSystemService(NotificationManager::class.java).notify(11, notification(state))
@@ -45,6 +45,20 @@ class AgentTaskService : Service() {
         return Notification.Builder(this, "agent").setSmallIcon(R.drawable.ic_luma).setContentTitle("Luma выполняет задачу").setContentText(text)
             .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PRIVATE)
             .addAction(Notification.Action.Builder(null, "Остановить", stop).build()).build()
+    }
+    /** While Luma is in the background, a finished task gets its own notification with sound and vibration. */
+    private fun notifyFinished() {
+        if (graph.appVisible) return
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        val state = graph.agent.state.value
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel("agent-done", "Задача завершена", NotificationManager.IMPORTANCE_DEFAULT).apply { enableVibration(true) })
+        val time = if (state.startedAt > 0) " · " + dev.luma.agent.core.formatElapsed(android.os.SystemClock.elapsedRealtime() - state.startedAt) else ""
+        val open = PendingIntent.getActivity(this, 2, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        manager.notify(12, Notification.Builder(this, "agent-done").setSmallIcon(R.drawable.ic_luma)
+            .setContentTitle(if (state.error != null) "Luma: нужна помощь" else "Luma закончила задачу$time")
+            .setContentText(dev.luma.agent.core.Tone.adapt(state.error ?: "Шагов: ${state.step}. Откройте чат, чтобы посмотреть итог.", graph.vault.state.value.formal))
+            .setContentIntent(open).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build())
     }
     override fun onDestroy() { if (!completed) graph.agent.stop("Android остановил выполнение задачи."); scope.cancel(); super.onDestroy() }
 }

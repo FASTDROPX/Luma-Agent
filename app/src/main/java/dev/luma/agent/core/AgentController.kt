@@ -40,10 +40,21 @@ class AgentController(private val context: Context, private val scope: Coroutine
                     val memory = AgentContext(history, goal)
                     val loopGuard = AgentLoopGuard()
                     var step = 0
+                    // The token limit pauses the task; continuing allows one more portion of the same size.
+                    val tokenPortion = settings.agentTokenLimit.coerceAtLeast(0) * 1000L
+                    var nextTokenPause = tokenPortion
                     while (settings.unlimitedAgent || step < settings.maxSteps.coerceIn(5,30)) {
                         awaitRunning(); step = (step + 1).coerceAtLeast(1); update("Обдумываю следующий шаг", step)
+                        val stepStarted = android.os.SystemClock.elapsedRealtime()
                         val generation = generateRecovering(settings,connection,memory.turns(vault.state.value.screenshots),step)
                         val raw = generation.text
+                        chats.addUsage(chat, generation.stats)
+                        val spent = mutable.value.tokens + (generation.stats?.let { it.inputTokens + it.outputTokens } ?: 0)
+                        mutable.value = mutable.value.copy(tokens = spent)
+                        if (tokenPortion > 0 && spent >= nextTokenPause) {
+                            nextTokenPause = spent + tokenPortion
+                            mutable.value = mutable.value.copy(paused = true, stage = "Задача потратила ${"%,d".format(spent).replace(',', ' ')} токенов — это предел из настроек. Агент на паузе: можно продолжить ещё на столько же или остановить.")
+                        }
                         awaitRunning()
                         when (val reply = AgentProtocol.parse(raw)) {
                             is AgentReply.Final -> { chats.append(chat, "assistant", reply.text, reasoning = generation.reasoning, stats = generation.stats); update("Готово", step); return@withTimeout }
@@ -70,7 +81,10 @@ class AgentController(private val context: Context, private val scope: Coroutine
                                         ToolResult(JSONObject().put("error", "Действие не завершилось вовремя.").put("note", "Не считайте действие выполненным. Обновите экран."))
                                     }
                                 if (reply.skipped > 0) result.json.put("protocolNote", "Выполнена только первая команда, ещё ${reply.skipped} отброшено. Присылай одну команду за ответ и планируй следующий шаг по новому экрану.")
-                                chats.append(chat, "tool", label + if (result.json.has("error")) " · ${result.json.optString("error")}" else " · готово")
+                                val took = android.os.SystemClock.elapsedRealtime() - stepStarted
+                                val ok = !result.json.has("error")
+                                chats.append(chat, "tool", label + (if (ok) " · готово" else " · ${result.json.optString("error")}") + " · ${formatSeconds(took)}")
+                                mutable.value = mutable.value.copy(log = (mutable.value.log + StepLog(step, label, took, ok, generation.stats?.outputPerSecond)).takeLast(200))
                                 memory.record(reply, raw, result.json, result.image)
                                 if (reply.name != "remember" && loopGuard.repeated(reply, result.json)) {
                                     mutable.value = mutable.value.copy(paused = true, stage = "Повторяются одинаковые шаги без изменений. Агент на паузе, чтобы сохранить квоту. Можно продолжить или остановить задачу.")

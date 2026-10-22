@@ -21,7 +21,7 @@ import java.io.File
 class MarkdownTest {
     @Test fun replyWipesFromLeftWithoutReducingGlyphOpacity() {
         val context=ApplicationProvider.getApplicationContext<Application>()
-        val engine=MarkdownEngine.create(context,true,40f)
+        val engine=MarkdownEngine.create(context,darkPalette,40f)
         val view=MarkdownView(context).apply {layoutParams=android.view.ViewGroup.LayoutParams(350,-2);textSize=40f;setTextColor(android.graphics.Color.WHITE)}
         view.display(engine,engine.toMarkdown("MMMM"),"wipe",false);view.setReveal(.125f)
         view.measure(View.MeasureSpec.makeMeasureSpec(350,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));view.layout(0,0,350,view.measuredHeight)
@@ -62,7 +62,7 @@ fun hello() = "Luma"
 """.trimIndent()
     @Test fun commonMarkAndGfmProduceRealSpansWithoutLiteralFormattingMarkers() {
         val context=ApplicationProvider.getApplicationContext<Application>()
-        val engine=MarkdownEngine.create(context,true,18f);val rich=engine.toMarkdown(sample)
+        val engine=MarkdownEngine.create(context,darkPalette,18f);val rich=engine.toMarkdown(sample)
         assertTrue(rich.toString().contains("Заголовок"));assertFalse(rich.toString().contains("**Жирный**"))
         assertFalse(rich.toString().contains("```"));assertFalse(rich.toString().contains("~~зачёркнутый~~"))
         val types=rich.getSpans(0,rich.length,Any::class.java).map {it.javaClass.simpleName}
@@ -70,7 +70,7 @@ fun hello() = "Luma"
     }
     @Test fun replyRevealsItsLaidOutLinesWithoutReparsingOrBreakingEmoji() {
         val context=ApplicationProvider.getApplicationContext<Application>()
-        val engine=MarkdownEngine.create(context,true,18f);val view=MarkdownView(context).apply {layoutParams=android.view.ViewGroup.LayoutParams(350,android.view.ViewGroup.LayoutParams.WRAP_CONTENT)}
+        val engine=MarkdownEngine.create(context,darkPalette,18f);val view=MarkdownView(context).apply {layoutParams=android.view.ViewGroup.LayoutParams(350,android.view.ViewGroup.LayoutParams.WRAP_CONTENT)}
         val rich=engine.toMarkdown(sample);view.setTextColor(0xffe8edf8.toInt());view.display(engine,rich,"sample",false)
         fun measure() {view.measure(View.MeasureSpec.makeMeasureSpec(350,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));view.layout(0,0,view.measuredWidth,view.measuredHeight)}
         measure();val full=view.height
@@ -89,7 +89,7 @@ fun hello() = "Luma"
         assertTrue(MarkdownEngine.safeLink("https://example.com"))
     }
     @Test fun remoteImagesBecomeTapToOpenLinksAndAreNeverLoaded() {
-        val engine=MarkdownEngine.create(ApplicationProvider.getApplicationContext<Application>(),true,18f)
+        val engine=MarkdownEngine.create(ApplicationProvider.getApplicationContext<Application>(),darkPalette,18f)
         val rich=engine.toMarkdown("Смотри ![кот](https://example.com/c.png?d=secret) и ![](https://example.com/x.png)")
         assertTrue(rich.toString().contains("🖼 кот"));assertTrue(rich.toString().contains("🖼 изображение"))
         val links=rich.getSpans(0,rich.length,io.noties.markwon.core.spans.LinkSpan::class.java).sortedBy {rich.getSpanStart(it)}.map {it.link}
@@ -104,7 +104,7 @@ fun hello() = "Luma"
         assertEquals(text.length,map.next(text.length-1))
     }
     @Test fun latexFormulaRendersWithTheBundledFontAssets() {
-        MarkdownEngine.create(ApplicationProvider.getApplicationContext<Application>(),true,24f)
+        MarkdownEngine.create(ApplicationProvider.getApplicationContext<Application>(),darkPalette,24f)
         val drawable=ru.noties.jlatexmath.JLatexMathDrawable.builder("\\frac{a^2+b^2}{2}").textSize(24f).color(android.graphics.Color.WHITE).build()
         assertTrue(drawable.bounds.width()>0 && drawable.bounds.height()>0)
         val bitmap=Bitmap.createBitmap(drawable.bounds.width(),drawable.bounds.height(),Bitmap.Config.ARGB_8888)
@@ -120,3 +120,6 @@ fun hello() = "Luma"
         fades.edit("а",true);assertTrue(fades.parts.isEmpty())
     }
 }
+
+/** The dark theme colours the Markdown engine used before it read the app theme. */
+internal val darkPalette=dev.luma.agent.ui.MarkdownPalette(0xffe8edf8.toInt(),0xffb7c9ff.toInt(),0xff202634.toInt(),0xffb7c9ff.toInt(),0xffb7c9ff.toInt(),0xff444c5c.toInt())

@@ -11,8 +11,9 @@ enum class Provider(val label: String, val base: String, val keyRequired: Boolea
     DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1/"),
     LOCAL("Локальный сервер", "", false)
 }
-data class ModelInfo(val id: String, val name: String = id, val vision: Boolean = false, val outputLimit: Int = 8192) {
-    fun json() = JSONObject().put("id", id).put("name", name).put("vision", vision).put("outputLimit", outputLimit)
+/** [imageOutput]: the model can draw pictures in its reply. */
+data class ModelInfo(val id: String, val name: String = id, val vision: Boolean = false, val outputLimit: Int = 8192, val imageOutput: Boolean = false) {
+    fun json() = JSONObject().put("id", id).put("name", name).put("vision", vision).put("outputLimit", outputLimit).put("imageOutput", imageOutput)
 }
 /** Optional sampling stays off by default: reasoning models often reject explicit sampling. */
 data class GenerationSettings(val maxTokens: Int = 0, val temperature: Float = -1f, val topP: Float = -1f,
@@ -57,8 +58,15 @@ data class AppSettings(
     val dynamicColors: Boolean = true, val reducedMotion: Boolean = false, val panel: Boolean = true,
     val screenshots: Boolean = false, val confirmActions: Boolean = true, val folder: String = "",
     val visuals: VisualSettings = VisualSettings(), val maxSteps: Int = 20, val taskMinutes: Int = 8,
-    val unlimitedAgent: Boolean = true, val blockedWords: String = "", val tokenMeter: Boolean = true
+    val unlimitedAgent: Boolean = true, val blockedWords: String = "", val tokenMeter: Boolean = true,
+    /** Size of chat text, 0.85..1.4 of the body style. */
+    val chatTextScale: Float = 1f, val haptics: Boolean = true,
+    /** Pause the agent after this many thousand tokens in one task; 0 = no limit. */
+    val agentTokenLimit: Int = 0,
+    /** "friendly" addresses the user as «ты», "formal" as «вы» — in the interface and in the model's replies. */
+    val tone: String = "friendly"
 ) {
+    val formal: Boolean get() = tone == "formal"
     fun connection(p: Provider = provider) = connections[p] ?: Connection()
     fun withGeneration(p: Provider, model: String, change: (GenerationSettings) -> GenerationSettings): AppSettings {
         val c = connection(p)
@@ -73,6 +81,7 @@ data class AppSettings(
             .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
             .put("maxSteps",maxSteps.coerceIn(5,30)).put("taskMinutes",taskMinutes.coerceIn(2,15)).put("unlimitedAgent", unlimitedAgent)
             .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH)).put("tokenMeter", tokenMeter)
+            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone)
     }
     companion object {
         fun parse(json: JSONObject): AppSettings {
@@ -81,14 +90,16 @@ data class AppSettings(
                 val models = c.optJSONArray("models") ?: JSONArray()
                 val parameters = c.optJSONObject("parameters") ?: JSONObject()
                 Connection(c.optString("key"), c.optString("model"), c.optString("endpoint"),
-                    (0 until models.length()).mapNotNull { i -> models.optJSONObject(i)?.let { ModelInfo(it.optString("id"), it.optString("name"), it.optBoolean("vision"), it.optInt("outputLimit", 8192)) } }, c.optLong("catalogAt"),
+                    (0 until models.length()).mapNotNull { i -> models.optJSONObject(i)?.let { ModelInfo(it.optString("id"), it.optString("name"), it.optBoolean("vision"), it.optInt("outputLimit", 8192), it.optBoolean("imageOutput")) } }, c.optLong("catalogAt"),
                     parameters.keys().asSequence().take(1000).mapNotNull { id -> parameters.optJSONObject(id)?.let { id to GenerationSettings.parse(it) } }.toMap())
             }
             return AppSettings(json.optBoolean("onboarded"), runCatching { Provider.valueOf(json.optString("provider")) }.getOrDefault(Provider.GEMINI),
                 connections, json.optString("theme", "system").takeIf { it in listOf("system","light","dark") } ?: "system", json.optBoolean("dynamicColors", true), json.optBoolean("reducedMotion"),
                 json.optBoolean("panel", true), json.optBoolean("screenshots"), json.optBoolean("confirmActions", true), json.optString("folder"),
                 VisualSettings.parse(json.optJSONObject("visuals") ?: JSONObject()),json.optInt("maxSteps",20).coerceIn(5,30),json.optInt("taskMinutes",8).coerceIn(2,15),json.optBoolean("unlimitedAgent",true),
-                json.optString("blockedWords").take(BlockedWords.MAX_LENGTH), json.optBoolean("tokenMeter", true))
+                json.optString("blockedWords").take(BlockedWords.MAX_LENGTH), json.optBoolean("tokenMeter", true),
+                json.optDouble("chatTextScale", 1.0).toFloat().let { if (it.isFinite()) it.coerceIn(.85f, 1.4f) else 1f }, json.optBoolean("haptics", true),
+                json.optInt("agentTokenLimit", 0).coerceIn(0, 5000), json.optString("tone", "friendly").takeIf { it in listOf("friendly", "formal") } ?: "friendly")
         }
     }
 }
@@ -102,10 +113,17 @@ open class UserError(override val message: String) : RuntimeException(message)
 fun safeError(error: Throwable): String = if (error is UserError) error.message else "Не получилось выполнить запрос. Проверьте подключение и попробуйте ещё раз."
 data class Turn(val role: String, val text: String, val image: String? = null, val attachments: List<AttachmentData> = emptyList())
 data class ChatMessage(val id: Long, val role: String, val text: String, val timestamp: Long, val attachments: List<Attachment> = emptyList(),
-    val reasoning: String = "", val stats: TokenStats? = null)
-data class Conversation(val id: Long, val title: String, val updated: Long)
+    val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false)
+data class Conversation(val id: Long, val title: String, val updated: Long, val pinned: Boolean = false)
 data class Approval(val title: String, val details: String, val background: Boolean = false)
 data class RunState(val active: Boolean = false, val paused: Boolean = false, val stage: String = "", val step: Int = 0,
     val chatId: Long = 0, val approval: Approval? = null, val error: String? = null, val retryPending: Boolean = false,
     /** SystemClock.elapsedRealtime() when the task started; drives the run timer. */
-    val startedAt: Long = 0)
+    val startedAt: Long = 0,
+    /** Steps of this task, newest last, for the expandable log in the agent card. */
+    val log: List<StepLog> = emptyList(),
+    /** Tokens (prompt + reply) this task has spent so far. */
+    val tokens: Long = 0)
+/** One agent step: what it did, how long the model and the action took, and whether it worked. */
+data class StepLog(val number: Int, val label: String, val millis: Long, val ok: Boolean, val outputPerSecond: Double? = null)
+fun formatSeconds(millis: Long): String = if (millis < 60_000) "%.1f с".format(java.util.Locale.ROOT, millis / 1000.0).replace('.', ',') else formatElapsed(millis)

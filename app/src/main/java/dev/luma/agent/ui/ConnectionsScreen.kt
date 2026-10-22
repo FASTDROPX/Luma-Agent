@@ -76,7 +76,7 @@ import dev.luma.agent.core.*
         toggleReveal = { reveal = !reveal }, paste = pasteKey,
         save = { reveal = false; graph.connect(provider, key, endpoint) }, pickModel = { modelSheet = true }
     ) else MotionLazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { PageTitle("ПОДКЛЮЧЕНИЯ", "Выбери свой AI", "Ключ хранится на телефоне в Android Keystore. Платные запросы оплачиваются на стороне провайдера.") }
+        item { PageTitle("ПОДКЛЮЧЕНИЯ", "Провайдер и модель", "Ключ хранится на телефоне в Android Keystore. Платные запросы оплачиваются на стороне провайдера.") }
         item {
             Row(Modifier.fillMaxWidth().motionHorizontalScroll(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Provider.entries.forEach { p -> FilterChip(selected = provider == p, onClick = { graph.switchProvider(p) }, label = { Text(p.label) }, leadingIcon = if (provider == p) ({ Icon(Icons.Outlined.Check, null, Modifier.size(16.dp)) }) else null) }
@@ -86,7 +86,7 @@ import dev.luma.agent.core.*
             SoftCard(Modifier.animateContentSize()) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) { Icon(if (provider == Provider.LOCAL) Icons.Outlined.Computer else Icons.Outlined.AutoAwesome, null, Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer) }
-                    Column { Text(provider.label, style = MaterialTheme.typography.titleLarge); Text(if (provider == Provider.LOCAL) "Ollama · LM Studio · OpenAI API" else "Подключение по вашему API-ключу", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Column { Text(provider.label, style = MaterialTheme.typography.titleLarge); Text(if (provider == Provider.LOCAL) "Ollama · LM Studio · OpenAI API" else t("Подключение по вашему API-ключу"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
                 if (provider == Provider.LOCAL) {
                     OutlinedTextField(value = endpoint, onValueChange = { endpoint = it; graph.cancelCatalog() }, label = { Text("Адрес API") }, placeholder = { Text("http://192.168.1.10:11434/v1/") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = MaterialTheme.shapes.medium, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
@@ -137,6 +137,7 @@ import dev.luma.agent.core.*
                 } else Text("После сохранения ключа здесь появятся модели, которые вернёт API. Для сервера без авторизации оставьте ключ пустым.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (connection.model.isNotEmpty()) item { ConnectionCheckCard(graph) }
         if (connection.key.isNotBlank() || connection.models.isNotEmpty()) item { TextButton(onClick = { removeDialog = true }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.LinkOff, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Удалить подключение ${provider.label}") } }
         item { Spacer(Modifier.height(8.dp)) }
     }
@@ -159,7 +160,7 @@ import dev.luma.agent.core.*
     BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 4.dp).testTag("setup-connection")) {
         val tight = maxHeight / LocalDensity.current.fontScale < 300.dp
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(if (tight) 4.dp else 10.dp, Alignment.CenterVertically)) {
-            if (!tight) Text("Подключение AI", style = MaterialTheme.typography.headlineSmall)
+            if (!tight) Text("Подключение модели", style = MaterialTheme.typography.headlineSmall)
             Surface(onClick = { providers = true }, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth().testTag("setup-provider")) {
                 Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(if (provider == Provider.LOCAL) Icons.Outlined.Computer else Icons.Outlined.Hub, null, tint = MaterialTheme.colorScheme.primary)
@@ -183,7 +184,7 @@ import dev.luma.agent.core.*
             }
             if (error != null) Surface(onClick = { showError = true }, shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth().testTag("setup-error")) {
                 Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.ErrorOutline, null, Modifier.size(20.dp)); Text("Не удалось загрузить · подробнее", Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.bodySmall) }
-            } else if (!tight) Text(if (connection.models.isEmpty()) "Сохрани ключ, затем выбери модель из API." else "Моделей: ${connection.models.size}. Выбор применяется сразу.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (!tight) Text(if (connection.models.isEmpty()) t("Сохрани ключ, затем выбери модель из API.") else "Моделей: ${connection.models.size}. Выбор применяется сразу.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (!tight) TextButton(onClick = { help = true }, contentPadding = PaddingValues(horizontal = 0.dp)) { Icon(Icons.Outlined.Info, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("О ключах и подключении", style = MaterialTheme.typography.labelMedium) }
         }
     }
@@ -191,10 +192,10 @@ import dev.luma.agent.core.*
         MotionLazyColumn { items(Provider.entries) { p -> ListItem(headlineContent = { Text(p.label) }, trailingContent = { if (p == provider) Icon(Icons.Outlined.Check, "Выбрано") }, modifier = Modifier.clickable { graph.switchProvider(p); providers = false }) } }
     }, confirmButton = { TextButton(onClick = { providers = false }) { Text("Закрыть") } })
     if (localKey) AlertDialog(onDismissRequest = { localKey = false }, title = { Text("Ключ сервера") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Оставь пустым, если сервер не требует авторизации.", style = MaterialTheme.typography.bodySmall); SetupKeyField(key, editKey, reveal, toggleReveal, paste) }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(t("Оставь пустым, если сервер не требует авторизации."), style = MaterialTheme.typography.bodySmall); SetupKeyField(key, editKey, reveal, toggleReveal, paste) }
     }, confirmButton = { TextButton(onClick = { localKey = false }) { Text("Готово") } })
     if (showError && error != null) AlertDialog(onDismissRequest = { showError = false }, title = { Text("Подключение не удалось") }, text = { Text(error, Modifier.motionScroll()) }, confirmButton = { TextButton(onClick = { showError = false }) { Text("Понятно") } })
-    if (help) AlertDialog(onDismissRequest = { help = false }, title = { Text("Твой AI, твой выбор") }, text = { Text("Ключ хранится зашифрованным на телефоне. Облачный провайдер получает отправленные сообщения и материалы; платные запросы оплачиваются у него.\n\nЛокальный API: телефон и сервер должны быть в одной сети, либо сервер может работать на самом телефоне. Укажи OpenAI-совместимый адрес с /v1/. Ключ сервера необязателен.\n\nВыбор модели и все параметры можно изменить во вкладке «Модели».", Modifier.motionScroll()) }, confirmButton = { TextButton(onClick = { help = false }) { Text("Понятно") } })
+    if (help) AlertDialog(onDismissRequest = { help = false }, title = { Text("О ключах и подключении") }, text = { Text(t("Ключ хранится зашифрованным на телефоне. Облачный провайдер получает отправленные сообщения и материалы; платные запросы оплачиваются у него.\n\nЛокальный API: телефон и сервер должны быть в одной сети, либо сервер может работать на самом телефоне. Укажи OpenAI-совместимый адрес с /v1/. Ключ сервера необязателен.\n\nВыбор модели и все параметры можно изменить во вкладке «Модели»."), Modifier.motionScroll()) }, confirmButton = { TextButton(onClick = { help = false }) { Text("Понятно") } })
 }
 
 @Composable private fun SetupKeyField(key: String, edit: (String) -> Unit, reveal: Boolean, toggle: () -> Unit, paste: () -> Unit, modifier: Modifier = Modifier) {
@@ -206,7 +207,7 @@ import dev.luma.agent.core.*
     var search by remember { mutableStateOf("") }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-            Text("Выберите модель", style = MaterialTheme.typography.headlineSmall)
+            Text(t("Выберите модель"), style = MaterialTheme.typography.headlineSmall)
             OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth().padding(vertical = 16.dp), placeholder = { Text("Поиск по названию") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = MaterialTheme.shapes.medium)
             val filtered = remember(search, models) { models.filter { it.id.contains(search, true) || it.name.contains(search, true) } }
             MotionLazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
@@ -216,6 +217,42 @@ import dev.luma.agent.core.*
                 if (filtered.isEmpty()) item { Text("Ничего не найдено", Modifier.padding(20.dp)) }
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/** «Проверить подключение»: one short real request to the chosen model, with its reply and speed. */
+@Composable private fun ConnectionCheckCard(graph: AppGraph) {
+    val check by graph.connectionCheck.collectAsStateWithLifecycle()
+    val settings by graph.vault.state.collectAsStateWithLifecycle()
+    // A result belongs to the model it was made with; switching models clears it.
+    LaunchedEffect(settings.provider, settings.connection().model) { if (!check.busy) graph.connectionCheck.value = dev.luma.agent.ConnectionCheck() }
+    SoftCard(Modifier.animateContentSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Проверка связи", style = MaterialTheme.typography.titleMedium)
+                Text("Короткий запрос к выбранной модели", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            FilledTonalButton(onClick = { graph.checkConnection() }, enabled = !check.busy, modifier = Modifier.testTag("check-connection")) {
+                if (check.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else Icon(Icons.Outlined.NetworkCheck, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp)); Text("Проверить")
+            }
+        }
+        check.error?.let { error ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Outlined.ErrorOutline, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("check-error"))
+            }
+        }
+        check.reply?.let { reply ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.CheckCircleOutline, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.secondary)
+                Column {
+                    Text("Работает" + (check.stats?.let { s -> " · ${dev.luma.agent.core.formatSeconds(s.totalMs)}" + (s.outputPerSecond?.let { " · ↓ ${dev.luma.agent.core.formatRate(it)} т/с" } ?: "") } ?: ""),
+                        style = MaterialTheme.typography.labelLarge, modifier = Modifier.testTag("check-ok"))
+                    if (reply.isNotBlank()) Text("«${reply.trim()}»", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                }
+            }
         }
     }
 }

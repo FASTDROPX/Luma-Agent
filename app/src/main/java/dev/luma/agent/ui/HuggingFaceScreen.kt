@@ -83,7 +83,7 @@ import kotlinx.coroutines.launch
             FilterChip(library,{library=true},label={Text("Загрузки (${downloads.size})")},leadingIcon={Icon(Icons.Outlined.Download,null,Modifier.size(16.dp))},modifier=Modifier.testTag("hub-library"))
         }
         if(library) MotionLazyColumn(Modifier.weight(1f).fillMaxWidth(),contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            if(downloads.isEmpty()) item { Text("Пока пусто. Найди модель в каталоге и выбери файл GGUF.",color=MaterialTheme.colorScheme.onSurfaceVariant) }
+            if(downloads.isEmpty()) item { Text(t("Пока пусто. Найди модель в каталоге и выбери файл GGUF."),color=MaterialTheme.colorScheme.onSurfaceVariant) }
             items(downloads,key={it.id}) { item ->
                 DownloadCard(item,share={action {
                     val file=graph.downloads.fileForShare(item.id)
@@ -104,12 +104,12 @@ import kotlinx.coroutines.launch
                 if(error!=null) item { SoftCard { Text(error!!,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium);OutlinedButton(onClick={retry++}){Text("Повторить")}} }
                 else if(!busy) {
                     if(repository==null) {
-                        if(repositories.isEmpty()) item { Text("Модели не найдены. Попробуй другое название.",style=MaterialTheme.typography.bodyMedium) }
+                        if(repositories.isEmpty()) item { Text(t("Модели не найдены. Попробуй другое название."),style=MaterialTheme.typography.bodyMedium) }
                         items(repositories,key={it.id}) { repo -> Surface(onClick={repository=repo.id},shape=MaterialTheme.shapes.medium,color=MaterialTheme.colorScheme.surfaceContainer,modifier=Modifier.fillMaxWidth().appear()) {
                             Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) { Icon(Icons.Outlined.AutoAwesome,null,tint=MaterialTheme.colorScheme.primary);Column(Modifier.weight(1f)) {Text(repo.id,style=MaterialTheme.typography.titleSmall,maxLines=2,overflow=TextOverflow.Ellipsis);Text("${repo.downloads} скачиваний · GGUF",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};Icon(Icons.Outlined.ChevronRight,null) }
                         } }
                     } else {
-                        if(files.isEmpty()) item {Text("В репозитории нет доступных GGUF до 32 ГБ. Выбери другую модель.",style=MaterialTheme.typography.bodyMedium)}
+                        if(files.isEmpty()) item {Text(t("В репозитории нет доступных GGUF до 32 ГБ. Выбери другую модель."),style=MaterialTheme.typography.bodyMedium)}
                         items(files,key={it.identity}) { file ->
                             val exists=downloads.any{it.file.identity==file.identity}
                             Surface(shape=MaterialTheme.shapes.medium,color=MaterialTheme.colorScheme.surfaceContainer,modifier=Modifier.fillMaxWidth().appear()) {

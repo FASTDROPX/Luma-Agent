@@ -117,11 +117,11 @@ class StreamingTest {
     @Test fun tablesAreSplitOutsideCodeWithAlignment() {
         val md = "Итог:\n\n| Вид | Значение |\n|:---|---:|\n| Орбиты | 144 |\n| Шар | **1** |\n\n```\n| не | таблица |\n|---|---|\n```\nконец"
         val segments = splitMarkdownTables(md)
-        assertEquals(3, segments.size)
+        assertEquals(4, segments.size)
         val table = segments[1] as MarkdownSegment.Table
         assertEquals(listOf("Вид", "Значение"), table.header); assertEquals(listOf(-1, 1), table.align)
         assertEquals(listOf("Шар", "**1**"), table.rows[1])
-        assertTrue((segments[2] as MarkdownSegment.Text).markdown.contains("| не | таблица |"))
+        assertTrue((segments[2] as MarkdownSegment.Code).code.contains("| не | таблица |")); assertEquals("конец", (segments[3] as MarkdownSegment.Text).markdown)
         assertEquals(1, splitMarkdownTables("просто текст | с чертой").size)
     }
 

@@ -70,7 +70,9 @@ class CoreTest {
             if(count==1)JSONObject("""{"models":[{"name":"models/gemini-good","supportedGenerationMethods":["generateContent"]},{"name":"models/gemini-image","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"a+b"}""")
             else { assertTrue(request.url.endsWith("pageToken=a%2Bb"));JSONObject("""{"models":[{"name":"models/gemini-other","supportedGenerationMethods":["generateContent"]}]}""") }
         }
-        assertEquals(listOf("gemini-good","gemini-other"),api.models(Provider.GEMINI,Connection("test-key")).map{it.id});assertEquals(2,count)
+        val models=api.models(Provider.GEMINI,Connection("test-key"))
+        // Image models stay in the list and are marked as painters.
+        assertEquals(listOf("gemini-good","gemini-image","gemini-other"),models.map{it.id});assertEquals(listOf(false,true,false),models.map{it.imageOutput});assertEquals(2,count)
     }
     @Test fun openRouterAuthenticatesBeforeUsingUserCatalog() = runTest {
         val urls=mutableListOf<String>()

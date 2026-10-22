@@ -19,6 +19,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -31,9 +33,26 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); enableEdgeToEdge(); requestedScreen = intent.getStringExtra("screen") ?: "chat"
         val graph = (application as LumaApp).graph
+        if (savedInstanceState == null) takeShared(intent)
         setContent { AppRoot(graph, requestedScreen) }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); requestedScreen = intent.getStringExtra("screen") ?: "chat"; setIntent(intent) }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); requestedScreen = intent.getStringExtra("screen") ?: "chat"; setIntent(intent); takeShared(intent) }
+    override fun onStart() { super.onStart(); (application as LumaApp).graph.visibleScreens.incrementAndGet() }
+    override fun onStop() { (application as LumaApp).graph.visibleScreens.updateAndGet { (it - 1).coerceAtLeast(0) }; super.onStop() }
+    /** Share → Luma from another app: the chat screen picks the text and files up. */
+    private fun takeShared(intent: Intent) {
+        if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_SEND_MULTIPLE) return
+        val text = listOfNotNull(intent.getStringExtra(Intent.EXTRA_SUBJECT), intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())
+            .filter { it.isNotBlank() }.distinct().joinToString("\n").take(12_000)
+        @Suppress("DEPRECATION")
+        val uris = if (intent.action == Intent.ACTION_SEND_MULTIPLE) intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM).orEmpty()
+            else listOfNotNull(intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM))
+        // Only content:// links: a file:// path from another app could point into Luma's own storage.
+        val safe = uris.filter { it.scheme == "content" }.take(4)
+        if (text.isBlank() && safe.isEmpty()) return
+        (application as LumaApp).graph.sharedContent.value = SharedContent(text, safe)
+        requestedScreen = "chat"
+    }
 }
 private data class Destination(val title: String, val icon: ImageVector)
 @Composable fun AppRoot(graph: AppGraph, requested: String = "chat") {
@@ -44,15 +63,18 @@ private data class Destination(val title: String, val icon: ImageVector)
     val selectedChat by graph.chats.selected.collectAsStateWithLifecycle()
     val tokenStats by graph.api.stats.collectAsStateWithLifecycle()
     val chatBusy by graph.chatBusy.collectAsStateWithLifecycle()
+    val usage by graph.chats.usage.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var history by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf<Long?>(null) }
-    BackHandler(enabled = settings.onboarded && tab != 0 && !history && deleting == null) { tab = 0 }
+    var models by remember { mutableStateOf(false) }
+    val shared by graph.sharedContent.collectAsStateWithLifecycle()
+    LaunchedEffect(shared) { if (shared != null) { tab = 0; history = false } }
+    BackHandler(enabled = settings.onboarded && tab != 0 && !history) { tab = 0 }
     LaunchedEffect(requested) { tab = if (requested == "access") 2 else 0 }
-    LaunchedEffect(notice) { notice?.let { snackbar.showSnackbar(it); graph.uiMessage.value = null } }
-    LumaTheme(settings) {
+    LaunchedEffect(notice) { notice?.let { snackbar.showSnackbar(dev.luma.agent.core.Tone.adapt(it, graph.vault.state.value.formal)); graph.uiMessage.value = null } }
+    LumaTheme(settings) { CompositionLocalProvider(LocalFormal provides settings.formal, LocalChatTextScale provides settings.chatTextScale.coerceIn(.85f, 1.4f), LocalHaptics provides settings.haptics) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (!settings.onboarded) {
                 Box { Onboarding(graph); SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 100.dp)) }
@@ -63,15 +85,19 @@ private data class Destination(val title: String, val icon: ImageVector)
                     snackbarHost = { SnackbarHost(snackbar) },
                     topBar = { TopAppBar(title = {
                         Column { Text(if (tab == 0) "Luma" else destinations[tab].title, style = MaterialTheme.typography.titleLarge)
-                            if (tab == 0) OneLine(if (settings.connection().model.isBlank()) "Твой AI-помощник" else "${shortModelName(settings.connection().model)} · ${if (settings.provider == dev.luma.agent.core.Provider.LOCAL) "локально" else settings.provider.label}",
-                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            // Tap the model line to switch models without leaving the chat.
+                            if (tab == 0) Row(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).clickable { models = true }.testTag("header-model"), verticalAlignment = Alignment.CenterVertically) {
+                                OneLine(if (settings.connection().model.isBlank()) "Модель не выбрана" else "${shortModelName(settings.connection().model)} · ${if (settings.provider == dev.luma.agent.core.Provider.LOCAL) "локально" else settings.provider.label}",
+                                    Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Icon(Icons.Outlined.ExpandMore, "Сменить модель", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            } }
                     }, navigationIcon = { LumaBadge(Modifier.padding(start = 16.dp, end = 10.dp).size(36.dp)) }, actions = {
                         if (tab == 0) Column(Modifier.padding(end = 4.dp), horizontalAlignment = Alignment.End) {
                             Row {
                                 IconButton(onClick = { history = true }, Modifier.size(42.dp)) { Icon(Icons.Outlined.History, "История чатов") }
                                 IconButton(onClick = { graph.cancelChat(); scope.launch { graph.chats.select(null) } }, Modifier.size(42.dp)) { Icon(Icons.Outlined.Add, "Новый чат") }
                             }
-                            if (settings.tokenMeter) TokenMeter(tokenStats, chatBusy || run.active)
+                            if (settings.tokenMeter) TokenMeter(tokenStats, chatBusy || run.active, usage = usage)
                         }
                     }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)) },
                     bottomBar = { if (!keyboardOpen) NavigationBar(containerColor = androidx.compose.ui.graphics.Color.Transparent, tonalElevation = 0.dp) { destinations.forEachIndexed { i, destination -> NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(destination.icon, destination.title) }, label = { Text(destination.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }) } } }
@@ -86,16 +112,9 @@ private data class Destination(val title: String, val icon: ImageVector)
                         }
                     }
                 }
-                if (history) ModalBottomSheet(onDismissRequest = { history = false }) {
-                    Text("Твои чаты", Modifier.padding(horizontal = 24.dp, vertical = 12.dp), style = MaterialTheme.typography.headlineSmall)
-                    MotionLazyColumn(Modifier.fillMaxWidth().heightIn(max = 500.dp)) {
-                        items(conversations, key = { it.id }) { chat -> ListItem(headlineContent = { Text(chat.title, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }, supportingContent = { Text(java.text.SimpleDateFormat("d MMM, HH:mm", java.util.Locale("ru")).format(java.util.Date(chat.updated)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }, leadingContent = { Icon(Icons.Outlined.ChatBubbleOutline, null) }, trailingContent = { IconButton(onClick = { deleting = chat.id }, enabled = !(run.active && run.chatId == chat.id)) { Icon(Icons.Outlined.DeleteOutline, "Удалить чат") } }, modifier = Modifier.clickable { scope.launch { graph.chats.select(chat.id) }; tab = 0; history = false }) }
-                        if (conversations.isEmpty()) item { Text("Здесь появятся твои разговоры", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    }
-                    Spacer(Modifier.height(24.dp))
-                }
-                deleting?.let { id -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Удалить чат?") }, text = { Text("Сообщения будут удалены с этого телефона.") }, confirmButton = { TextButton(onClick = { scope.launch { graph.chats.delete(id) }; deleting = null }) { Text("Удалить") } }, dismissButton = { TextButton(onClick = { deleting = null }) { Text("Отмена") } }) }
+                if (history) HistorySheet(graph, { history = false }) { id -> scope.launch { graph.chats.select(id) }; tab = 0; history = false }
+                if (models) ModelSheet(graph, { models = false }) { tab = 1 }
             }
         }
-    }
+    } }
 }
