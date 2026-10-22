@@ -1,0 +1,108 @@
+package dev.luma.agent.core
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+enum class Provider(val label: String, val base: String, val keyRequired: Boolean = true) {
+    GEMINI("Gemini", "https://generativelanguage.googleapis.com/v1beta/"),
+    OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1/"),
+    OPENAI("OpenAI", "https://api.openai.com/v1/"),
+    CLAUDE("Claude", "https://api.anthropic.com/v1/"),
+    DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1/"),
+    LOCAL("Локальный сервер", "", false)
+}
+data class ModelInfo(val id: String, val name: String = id, val vision: Boolean = false, val outputLimit: Int = 8192) {
+    fun json() = JSONObject().put("id", id).put("name", name).put("vision", vision).put("outputLimit", outputLimit)
+}
+/** Optional sampling stays off by default: reasoning models often reject explicit sampling. */
+data class GenerationSettings(val maxTokens: Int = 0, val temperature: Float = -1f, val topP: Float = -1f,
+    val contextTurns: Int = 20, val instruction: String = "") {
+    fun sanitized() = copy(maxTokens = if (maxTokens == 0) 0 else maxTokens.coerceIn(256,8192),
+        temperature = if (!temperature.isFinite() || temperature < 0) -1f else temperature.coerceIn(0f,1f),
+        topP = if (!topP.isFinite() || topP < 0) -1f else topP.coerceIn(.05f,1f),
+        contextTurns = contextTurns.coerceIn(2,30), instruction = instruction.take(4000))
+    fun json() = sanitized().let { JSONObject().put("maxTokens",it.maxTokens).put("temperature",it.temperature)
+        .put("topP",it.topP).put("contextTurns",it.contextTurns).put("instruction",it.instruction) }
+    companion object { fun parse(j: JSONObject) = GenerationSettings(j.optInt("maxTokens"), j.optDouble("temperature",-1.0).toFloat(),
+        j.optDouble("topP",-1.0).toFloat(),j.optInt("contextTurns",20),j.optString("instruction")).sanitized() }
+}
+data class VisualSettings(val palette: String = "sky", val blackBackground: Boolean = false,
+    val smoothInput: Boolean = true, val motionBlur: Boolean = false, val blurStrength: Float = .45f,
+    val particleCount: Int = 144, val orbitSpeed: Float = 1f, val returnDelay: Float = 3f,
+    val cursor: Boolean = true, val edgeGlow: Boolean = true, val glowIntensity: Float = .7f) {
+    fun sanitized() = copy(palette = palette.takeIf { it in listOf("sky","lilac","mint","peach") } ?: "sky",
+        blurStrength = blurStrength.finiteClamp(.1f,1f,.45f), particleCount = particleCount.coerceIn(36,180),
+        orbitSpeed = orbitSpeed.finiteClamp(.4f,2f,1f), returnDelay = returnDelay.finiteClamp(2f,6f,3f),
+        glowIntensity = glowIntensity.finiteClamp(.2f,1f,.7f))
+    fun json() = sanitized().let { JSONObject().put("palette",it.palette).put("blackBackground",it.blackBackground)
+        .put("smoothInput",it.smoothInput).put("motionBlur",it.motionBlur).put("blurStrength",it.blurStrength)
+        .put("particleCount",it.particleCount).put("orbitSpeed",it.orbitSpeed).put("returnDelay",it.returnDelay)
+        .put("cursor",it.cursor).put("edgeGlow",it.edgeGlow).put("glowIntensity",it.glowIntensity) }
+    companion object { fun parse(j: JSONObject) = VisualSettings(j.optString("palette","sky"),j.optBoolean("blackBackground"),
+        j.optBoolean("smoothInput",true),j.optBoolean("motionBlur"),j.optDouble("blurStrength",.45).toFloat(),j.optInt("particleCount",144),
+        j.optDouble("orbitSpeed",1.0).toFloat(),j.optDouble("returnDelay",3.0).toFloat(),j.optBoolean("cursor",true),
+        j.optBoolean("edgeGlow",true),j.optDouble("glowIntensity",.7).toFloat()).sanitized() }
+}
+private fun Float.finiteClamp(low: Float,high: Float,fallback: Float) = if(isFinite()) coerceIn(low,high) else fallback
+
+data class Connection(val key: String = "", val model: String = "", val endpoint: String = "", val models: List<ModelInfo> = emptyList(), val catalogAt: Long = 0,
+    val parameters: Map<String,GenerationSettings> = emptyMap()) {
+    fun generation() = (parameters[model] ?: GenerationSettings()).sanitized()
+    fun json() = JSONObject().put("key", key).put("model", model).put("endpoint", endpoint).put("models", JSONArray(models.map { it.json() })).put("catalogAt", catalogAt)
+        .put("parameters",JSONObject().also { j -> parameters.forEach { (id,p) -> j.put(id,p.json()) } })
+}
+data class AppSettings(
+    val onboarded: Boolean = false, val provider: Provider = Provider.GEMINI,
+    val connections: Map<Provider, Connection> = emptyMap(), val theme: String = "system",
+    val dynamicColors: Boolean = true, val reducedMotion: Boolean = false, val panel: Boolean = true,
+    val screenshots: Boolean = false, val confirmActions: Boolean = true, val folder: String = "",
+    val visuals: VisualSettings = VisualSettings(), val maxSteps: Int = 20, val taskMinutes: Int = 8,
+    val unlimitedAgent: Boolean = true, val blockedWords: String = ""
+) {
+    fun connection(p: Provider = provider) = connections[p] ?: Connection()
+    fun withGeneration(p: Provider, model: String, change: (GenerationSettings) -> GenerationSettings): AppSettings {
+        val c = connection(p)
+        if(model.isBlank()) return this
+        return copy(connections = connections + (p to c.copy(parameters = c.parameters + (model to change(c.parameters[model] ?: GenerationSettings()).sanitized()))))
+    }
+    fun json(): JSONObject {
+        val config = JSONObject(); connections.forEach { (p, c) -> config.put(p.name, c.json()) }
+        return JSONObject().put("version", 2).put("onboarded", onboarded).put("provider", provider.name)
+            .put("connections", config).put("theme", theme).put("dynamicColors", dynamicColors)
+            .put("reducedMotion", reducedMotion).put("panel", panel).put("screenshots", screenshots)
+            .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
+            .put("maxSteps",maxSteps.coerceIn(5,30)).put("taskMinutes",taskMinutes.coerceIn(2,15)).put("unlimitedAgent", unlimitedAgent)
+            .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH))
+    }
+    companion object {
+        fun parse(json: JSONObject): AppSettings {
+            val connections = Provider.entries.associateWith { provider ->
+                val c = json.optJSONObject("connections")?.optJSONObject(provider.name) ?: JSONObject()
+                val models = c.optJSONArray("models") ?: JSONArray()
+                val parameters = c.optJSONObject("parameters") ?: JSONObject()
+                Connection(c.optString("key"), c.optString("model"), c.optString("endpoint"),
+                    (0 until models.length()).mapNotNull { i -> models.optJSONObject(i)?.let { ModelInfo(it.optString("id"), it.optString("name"), it.optBoolean("vision"), it.optInt("outputLimit", 8192)) } }, c.optLong("catalogAt"),
+                    parameters.keys().asSequence().take(1000).mapNotNull { id -> parameters.optJSONObject(id)?.let { id to GenerationSettings.parse(it) } }.toMap())
+            }
+            return AppSettings(json.optBoolean("onboarded"), runCatching { Provider.valueOf(json.optString("provider")) }.getOrDefault(Provider.GEMINI),
+                connections, json.optString("theme", "system").takeIf { it in listOf("system","light","dark") } ?: "system", json.optBoolean("dynamicColors", true), json.optBoolean("reducedMotion"),
+                json.optBoolean("panel", true), json.optBoolean("screenshots"), json.optBoolean("confirmActions", true), json.optString("folder"),
+                VisualSettings.parse(json.optJSONObject("visuals") ?: JSONObject()),json.optInt("maxSteps",20).coerceIn(5,30),json.optInt("taskMinutes",8).coerceIn(2,15),json.optBoolean("unlimitedAgent",true),
+                json.optString("blockedWords").take(BlockedWords.MAX_LENGTH))
+        }
+    }
+}
+/** User-defined words that force a confirmation; there is no built-in list. */
+object BlockedWords {
+    const val MAX_LENGTH = 2000
+    fun parse(raw: String): List<String> = raw.split(',', ';', '\n').map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(200)
+    fun match(raw: String, text: String): String? = parse(raw).firstOrNull { text.contains(it, ignoreCase = true) }
+}
+open class UserError(override val message: String) : RuntimeException(message)
+fun safeError(error: Throwable): String = if (error is UserError) error.message else "Не получилось выполнить запрос. Проверьте подключение и попробуйте ещё раз."
+data class Turn(val role: String, val text: String, val image: String? = null, val attachments: List<AttachmentData> = emptyList())
+data class ChatMessage(val id: Long, val role: String, val text: String, val timestamp: Long, val attachments: List<Attachment> = emptyList())
+data class Conversation(val id: Long, val title: String, val updated: Long)
+data class Approval(val title: String, val details: String, val background: Boolean = false)
+data class RunState(val active: Boolean = false, val paused: Boolean = false, val stage: String = "", val step: Int = 0,
+    val chatId: Long = 0, val approval: Approval? = null, val error: String? = null, val retryPending: Boolean = false)

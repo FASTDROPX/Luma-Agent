@@ -1,0 +1,22 @@
+Third-party software in Luma Agent 0.5.2
+
+Markwon 4.6.2, Dimitry Ivanov and contributors
+https://github.com/noties/Markwon
+Apache License 2.0 (APACHE-2.0.txt).
+
+CommonMark Java 0.13.0 and GFM extensions, Atlassian and contributors
+https://github.com/commonmark/commonmark-java
+BSD 2-clause (COMMONMARK-BSD.txt).
+
+JLaTeXMath-Android 0.2.0, Dimitry Ivanov; original JMathTeX / JLaTeXMath
+Universiteit Gent, Calixte Denizet and contributors
+https://github.com/noties/jlatexmath-android
+GNU GPL v2 or later, with the independent-module linking exception quoted
+in JLATEXMATH-EXCEPTION.txt; see GPL-2.0.txt. Upstream library is unmodified.
+The Luma source distribution includes the exact upstream Java source archive
+and original resources in third_party/.
+Sources: https://repo.maven.apache.org/maven2/ru/noties/jlatexmath-android/0.2.0/jlatexmath-android-0.2.0-sources.jar
+
+AndroidX / Compose, Kotlin / kotlinx.coroutines, and OkHttp are distributed
+under the Apache License 2.0. See APACHE-2.0.txt and the respective upstream
+project notices. No warranties are provided by these upstream projects.

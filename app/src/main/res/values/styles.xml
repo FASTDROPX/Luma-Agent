@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.Luma" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">#A7B6FF</item>
+        <item name="android:windowBackground">#10131A</item>
+    </style>
+    <string name="accessibility_description">Luma выполняет только запущенные вами задачи: читает доступные элементы экрана, нажимает, прокручивает и вводит текст. Скриншоты по вашему выбору могут передаваться выбранной AI-модели. Служба не записывает экран в фоне. Остановить задачу можно из панели, приложения или уведомления.</string>
+</resources>
