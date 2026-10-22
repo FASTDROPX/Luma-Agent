@@ -1,4 +1,4 @@
-Third-party software in Luma Agent 0.5.2
+Third-party software in Luma Agent 0.5.3
 
 Markwon 4.6.2, Dimitry Ivanov and contributors
 https://github.com/noties/Markwon

@@ -1,6 +1,6 @@
-# Luma Agent 0.5.2 · отчёт о сборке
+# Luma Agent 0.5.3 · отчёт о сборке
 
-Package `dev.luma.agent`, versionCode 11, versionName 0.5.2, minSdk 26, target/compileSdk 35.
+Package `dev.luma.agent`, versionCode 12, versionName 0.5.3, minSdk 26, target/compileSdk 35.
 Изменения версии — в [CHANGELOG.md](CHANGELOG.md).
 
 ## Окружение
@@ -17,11 +17,15 @@ Compose BOM 2025.04.01, SDK 35, build-tools 35.0.0, Robolectric 4.14.1 (Native G
 - Release собран с R8 и сокращением ресурсов, выровнен на 16 КБ, подписан v2/v3
   новым ключом (хранится вне репозитория).
 - Android Lint: 0 ошибок, 23 предупреждения.
-- Юнит-тесты: 108, из них 104 проходят. В том числе 6 новых тестов 0.5.2: запрещённые
-  слова, локальные адреса, блокировка HTTP к внешним хостам, тексты лимитов,
-  картинки ссылками, ограничение истории.
-- 4 теста не проходят на Windows-хосте, и все они касаются кода, который в 0.5.2
-  не менялся:
+- Юнит-тесты: 109, из них 105 проходят на Windows; на GitHub CI (Linux) проходят все.
+  Новые тесты 0.5.2–0.5.3: запрещённые слова, локальные адреса, блокировка HTTP
+  к внешним хостам, тексты лимитов, картинки ссылками, ограничение истории,
+  разбор команд реальных моделей (план из нескольких команд, синонимы, `<think>`),
+  долгий таймаут только для локального сервера.
+- Агент проверен на эмуляторе Android 15 с локальной Qwen3-8B через Ollama: главный
+  экран, чтение экрана, нажатие на строку поиска Google.
+- 4 теста не проходят только на Windows-хосте, и все они касаются кода, который
+  в 0.5.2–0.5.3 не менялся:
   - `VaultAgentTest.keysAreEncryptedAndSelectedConfigurationSurvivesRestart`,
     `UiTest.settingsSectionsPersistEffectsAndIndependentModelInstructions`,
     `UiTest.chatAccessModesPersistAndSystemPromptLivesOnlyInModelSettings` — после
