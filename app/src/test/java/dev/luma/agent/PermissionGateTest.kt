@@ -55,7 +55,7 @@ class PermissionGateTest {
             else -> { assertTrue(request.bodyText.contains("не выдан")); Replies.openAiText("Без доступа к SMS не могу прочитать переписку.") }
         } }
         val watcher = CoroutineScope(Dispatchers.Unconfined)
-        watcher.launch { agent.controller.state.collect { if (it.permission != null) agent.controller.resumeAccess() } } // «Пропустить»
+        watcher.launch { agent.controller.state.collect { if (it.permission != null) agent.controller.skipAccess() } } // «Пропустить»
         try {
             val messages = agent.run("Прочитай мои SMS")
             assertEquals("Без доступа к SMS не могу прочитать переписку.", messages.last().text)

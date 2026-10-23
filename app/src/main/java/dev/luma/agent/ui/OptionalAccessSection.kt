@@ -64,6 +64,7 @@ private fun icon(id: String): ImageVector = when (id) {
         val runtime = item.runtime()
         when {
             item.id == "background_location" && granted["location"] != true -> graph.uiMessage.value = "Сначала разрешите обычное местоположение."
+            item.id == "background_location" && android.os.Build.VERSION.SDK_INT >= 30 -> BackgroundAccess.open(context, OptionalAccess.appDetails(context))
             runtime.isNotEmpty() && granted[item.id] != true -> ask(runtime)
             else -> if (!BackgroundAccess.open(context, item.screens(context))) graph.uiMessage.value = "Откройте настройки → Приложения → Luma вручную."
         }

@@ -57,19 +57,19 @@ class PhoneTools(private val context: Context, private val sms: SmsSender = Real
     }
 
     private fun query(uri: Uri, projection: Array<String>, selection: String? = null, selArgs: Array<String>? = null, order: String? = null): Cursor? =
-        runCatching { context.contentResolver.query(uri, projection, selection, selArgs, order) }.getOrNull()
+        context.contentResolver.query(uri, projection, selection, selArgs, order)
 
     private fun findContacts(queryText: String, limit: Int): JSONObject {
         val found = LinkedHashMap<String, JSONObject>()
         query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-            arrayOf(ContactsContract.CommonDataKinds.Phone.CONTACT_ID, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
+            arrayOf(ContactsContract.CommonDataKinds.Phone.CONTACT_ID, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER, ContactsContract.CommonDataKinds.Phone.RAW_CONTACT_ID),
             "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?", arrayOf("%$queryText%"), ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC")?.use { c ->
             val id = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
             val name = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
             val number = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
             while (c.moveToNext() && found.size <= limit * 3) {
                 val key = c.getString(id) ?: continue
-                val entry = found.getOrPut(key) { JSONObject().put("name", c.getString(name).orEmpty()).put("numbers", JSONArray()) }
+                val entry = found.getOrPut(key) { JSONObject().put("contact_id", key).put("raw_contact_id", c.getLong(c.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.RAW_CONTACT_ID))).put("name", c.getString(name).orEmpty()).put("numbers", JSONArray()) }
                 c.getString(number)?.takeIf { it.isNotBlank() }?.let { entry.getJSONArray("numbers").put(it) }
             }
         }
@@ -129,7 +129,8 @@ class PhoneTools(private val context: Context, private val sms: SmsSender = Real
     @SuppressLint("MissingPermission")
     private suspend fun location(): JSONObject {
         val manager = context.getSystemService(LocationManager::class.java) ?: throw ToolFailure(ToolStatus.UNSUPPORTED, "Геолокация недоступна.")
-        val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).filter { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
+        val fine = context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val providers = (if (fine) listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER) else listOf(LocationManager.NETWORK_PROVIDER)).filter { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
         if (providers.isEmpty()) throw ToolFailure(ToolStatus.NEEDS_USER_ACTION, "Геолокация на телефоне выключена.", "Включите определение местоположения в шторке или настройках.")
         @Suppress("DEPRECATION")
         val last = providers.mapNotNull { runCatching { manager.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
@@ -141,7 +142,8 @@ class PhoneTools(private val context: Context, private val sms: SmsSender = Real
     }
     @SuppressLint("MissingPermission")
     private suspend fun current(manager: LocationManager, providers: List<String>): Location? = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-        val listener = android.location.LocationListener { location -> if (cont.isActive) cont.resume(location) {} }
+        lateinit var listener: android.location.LocationListener
+        listener = android.location.LocationListener { location -> if (cont.isActive) { manager.removeUpdates(listener); cont.resume(location) {} } }
         runCatching { manager.requestLocationUpdates(providers.first(), 0L, 0f, listener, context.mainLooper) }
             .onFailure { if (cont.isActive) cont.resume(null) {} }
         cont.invokeOnCancellation { runCatching { manager.removeUpdates(listener) } }
@@ -151,9 +153,9 @@ class PhoneTools(private val context: Context, private val sms: SmsSender = Real
         val events = JSONArray()
         val now = System.currentTimeMillis(); val until = now + days * 86_400_000L
         val uri = android.provider.CalendarContract.Events.CONTENT_URI
-        query(uri, arrayOf("title", "dtstart", "dtend", "eventLocation"), "dtstart BETWEEN ? AND ?", arrayOf(now.toString(), until.toString()), "dtstart ASC")?.use { c ->
+        query(uri, arrayOf("title", "dtstart", "dtend", "eventLocation", "_id", "calendar_id"), "dtstart BETWEEN ? AND ?", arrayOf(now.toString(), until.toString()), "dtstart ASC")?.use { c ->
             while (c.moveToNext() && events.length() < 40) {
-                events.put(JSONObject().put("title", c.getString(0).orEmpty()).put("start", time(c.getLong(1)))
+                events.put(JSONObject().put("id", c.getLong(4)).put("calendar_id", c.getLong(5)).put("title", c.getString(0).orEmpty()).put("start", time(c.getLong(1))).put("end", time(c.getLong(2)))
                     .put("location", c.getString(3).orEmpty()))
             }
         }
@@ -163,10 +165,10 @@ class PhoneTools(private val context: Context, private val sms: SmsSender = Real
     private fun listMedia(type: String, limit: Int): JSONObject {
         val uri = when (type) { "video" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI; "audio" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI; else -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI }
         val items = JSONArray()
-        query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_ADDED),
+        query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns._ID),
             null, null, MediaStore.MediaColumns.DATE_ADDED + " DESC")?.use { c ->
             while (c.moveToNext() && items.length() < limit) items.put(JSONObject().put("name", c.getString(0).orEmpty())
-                .put("sizeKB", c.getLong(1) / 1024).put("added", time(c.getLong(2) * 1000)))
+                .put("id", c.getLong(3)).put("uri", android.content.ContentUris.withAppendedId(uri, c.getLong(3)).toString()).put("sizeKB", c.getLong(1) / 1024).put("added", time(c.getLong(2) * 1000)))
         }
         return JSONObject().put("status", ToolStatus.DONE).put("type", type).put("count", items.length()).put("files", items)
             .put("note", "Чтобы изменять эти файлы, нужна отдельная папка workspace:/ или доступ ко всем файлам.")

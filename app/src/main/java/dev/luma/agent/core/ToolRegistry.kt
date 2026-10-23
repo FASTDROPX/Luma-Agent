@@ -216,20 +216,20 @@ object ToolRegistry {
         ToolSpec("list_calendar", "phone", "ближайшие события календаря", listOf(a("days", ArgType.INT, min = 1, max = 60)),
             "events", "Календарь", sideEffect = false, access = "calendar", label = { "Смотрю календарь" }),
         ToolSpec("list_media", "phone", "список фото, видео или аудио телефона (только чтение)", listOf(a("type", ArgType.STRING, choices = listOf("image", "video", "audio")), a("limit", ArgType.INT, min = 1, max = 50)),
-            "files", "Медиатека", sideEffect = false, access = "photos", label = { "Смотрю медиатеку" }),
+            "files", "Медиатека", sideEffect = false, label = { "Смотрю медиатеку" }),
         ToolSpec("app_usage", "phone", "сколько времени открыты приложения", listOf(a("days", ArgType.INT, min = 1, max = 30), a("limit", ArgType.INT, min = 1, max = 30)),
             "apps", "Статистика использования", sideEffect = false, access = "usage", label = { "Смотрю статистику приложений" }),
         ToolSpec("describe_tool", "meta", "подробности инструмента: аргументы, результат, разрешения, доступность", listOf(a("name", ArgType.STRING, required = true, maxLength = 60)), "details", sideEffect = false, label = { "Уточняю инструмент ${it.s("name")}" }),
-    )
+    ) + ExtendedToolSpecs.specs + SearchingChat.TOOLS
     private val byName = specs.associateBy { it.name }
     /** Tools that act on the screen or open another app: before the first of them the agent's overlay appears. */
-    fun controlsScreen(name: String): Boolean = byName[name]?.group in setOf("screen", "system") ||
-        name in setOf("open_app", "open_url", "open_settings", "show_alarms", "create_event")
+    fun controlsScreen(name: String): Boolean = name != "wait" && (byName[name]?.group in setOf("screen", "system") ||
+        name in setOf("open_app", "open_url", "open_settings", "show_alarms", "create_event"))
     val names: Set<String> = byName.keys
     operator fun get(name: String): ToolSpec? = byName[name]
 
     private val groupTitles = linkedMapOf("device" to "Устройство (сразу, без экрана)", "system" to "Система", "apps" to "Приложения и ссылки",
-        "time" to "Время", "files" to "Файлы workspace:/", "screen" to "Экран (запасной путь)", "meta" to "Служебные")
+        "time" to "Время", "files" to "Файлы workspace:/", "screen" to "Экран (запасной путь)", "meta" to "Служебные", "phone" to "Телефон", "access" to "Доступы и действия", "web" to "Интернет")
     /** One line per tool for models that use JSON commands; details come from describe_tool. */
     fun catalog(): String = groupTitles.entries.joinToString("\n") { (group, title) ->
         "$title: " + specs.filter { it.group == group }.joinToString("; ") { it.signature() }

@@ -9,6 +9,20 @@ import org.json.JSONObject
  * and which one to try next. The analysis becomes a lesson in the agent's working notes.
  */
 object Reflection {
+    /** A changed screen can still be the wrong result: Telegram's message menu is a common example. */
+    fun unexpectedMenu(goal: String, before: JSONObject?, after: JSONObject?): Boolean {
+        if (!Regex("(?i)(ссыл|брауз|link|browser)").containsMatchIn(goal)) return false
+        if (before == null || after == null) return false
+        val beforeNodes = before.optJSONArray("nodes") ?: return false
+        val hasLink = (0 until beforeNodes.length()).any { index ->
+            val node = beforeNodes.optJSONObject(index) ?: return@any false
+            node.optJSONArray("links")?.length()?.let { it > 0 } == true || ScreenLinks.find(node.optString("text") + " " + node.optString("description")).isNotEmpty()
+        }
+        if (!hasLink) return false
+        val nodes = after.optJSONArray("nodes") ?: return false
+        val labels = (0 until nodes.length()).map { nodes.optJSONObject(it)?.optString("text").orEmpty().trim().lowercase() }
+        return labels.any { it == "копировать" || it == "copy" } && labels.any { it in setOf("ответить", "переслать", "reply", "forward", "удалить", "delete") }
+    }
     data class Result(val why: String, val options: List<String>, val next: String) {
         /** One line for the working notes the model sees on every next step. */
         fun lesson(failed: String) = buildString {

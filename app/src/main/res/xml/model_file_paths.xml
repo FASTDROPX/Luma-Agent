@@ -2,4 +2,6 @@
     <external-files-path name="gguf_models" path="Download/huggingface/"/>
     <!-- Temporary copies for «Поделиться» from the chat; the folder holds nothing else. -->
     <cache-path name="shared" path="share/"/>
+    <files-path name="captures" path="captures/"/>
+    <cache-path name="install" path="install/"/>
 </paths>

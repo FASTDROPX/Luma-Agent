@@ -71,6 +71,8 @@ object DeviceCapabilities {
             Entry("контакты, звонки, SMS, журнал звонков, местоположение, календарь, медиатека, статистика приложений", CONFIRM,
                 listOf("find_contacts", "call_number", "send_sms", "read_sms", "read_call_log", "get_location", "list_calendar", "list_media", "app_usage"),
                 "у каждого свой доступ — Luma попросит выдать его в чате; звонок и SMS подтверждаешь отдельно"),
+            Entry("камера, микрофон, запись контактов и календаря, датчики, Bluetooth/Wi-Fi, общая память, APK, уведомления", CONFIRM,
+                ExtendedToolSpecs.names.toList(), "доступ запрашивается карточкой; sensitive действия подтверждаются отдельно; access_status показывает состояние"),
         )
     }
     fun prompt(entries: List<Entry>): String {

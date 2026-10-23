@@ -41,7 +41,7 @@ class AgentTaskService : Service() {
     private fun notification(state: RunState): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(this, 1, Intent(this, AgentTaskService::class.java).setAction("STOP"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val text = if (state.approval != null) "Нужно ваше подтверждение" else if (state.paused) "На паузе" else state.stage
+        val text = if (state.permission != null) "Выдайте доступ в чате: ${state.permission.title}" else if (state.systemAction != null) "Продолжите действие в чате Luma" else if (state.approval != null) "Нужно ваше подтверждение" else if (state.paused) "На паузе" else state.stage
         return Notification.Builder(this, "agent").setSmallIcon(R.drawable.ic_luma).setContentTitle("Luma выполняет задачу").setContentText(text)
             .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PRIVATE)
             .addAction(Notification.Action.Builder(null, "Остановить", stop).build()).build()

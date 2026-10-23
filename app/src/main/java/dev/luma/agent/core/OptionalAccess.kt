@@ -23,7 +23,7 @@ object OptionalAccess {
     enum class Group(val title: String, val note: String) {
         ACTIONS("Нужны отдельным действиям Luma", "Без них Luma откроет нужные настройки и попросит вас переключить вручную."),
         BACKGROUND("Работа в фоне", "Чтобы Android не приостанавливал долгую задачу или ответ локальной модели, когда экран выключен."),
-        RESERVE("Про запас", "Инструменты Luma эти разрешения пока не используют: их можно выдать заранее для будущих возможностей. Каждое можно отозвать в настройках Android.")
+        RESERVE("Данные и возможности телефона", "Агент запрашивает доступ перед конкретным действием. Камеру, запись, звонки, отправку и удаление подтверждаете вы. Каждый доступ можно отозвать в Android.")
     }
 
     /**
@@ -68,6 +68,7 @@ object OptionalAccess {
         Item("camera", "Камера", "Фото и видео", Group.RESERVE, permissions = { listOf(Manifest.permission.CAMERA) }),
         Item("microphone", "Микрофон", "Запись звука и голосовой ввод", Group.RESERVE, permissions = { listOf(Manifest.permission.RECORD_AUDIO) }),
         Item("location", "Местоположение", "Точное и приблизительное", Group.RESERVE,
+            special = { c -> c.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED || c.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED },
             permissions = { listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION) }),
         Item("background_location", "Местоположение в фоне", "Всегда, а не только при открытой Luma; сначала нужно обычное местоположение", Group.RESERVE, 29,
             permissions = { listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }),
@@ -111,26 +112,32 @@ object OptionalAccess {
             screens = { screen(it, Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT) }),
     )
 
-    fun item(id: String): Item? = all.firstOrNull { it.id == id }
+    fun item(id: String): Item? = (all + listOf(Item("accessibility", "Управление экраном", "Чтение экрана, нажатия и ввод текста", Group.ACTIONS,
+        special = { dev.luma.agent.AgentAccessibilityService.instance != null }, screens = { listOf(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }),
+        Item("workspace", "Выбранная папка", "Выберите папку для файлов задачи", Group.ACTIONS, special = { c ->
+            (c.applicationContext as? dev.luma.agent.LumaApp)?.graph?.vault?.state?.value?.folder?.let { Workspace.describe(c, it).usable } == true }),
+        Item("screenshots", "Снимки для модели", "Передать изображение экрана выбранной модели", Group.ACTIONS, special = { c ->
+            (c.applicationContext as? dev.luma.agent.LumaApp)?.graph?.vault?.state?.value?.screenshots == true }))).firstOrNull { it.id == id }
     /** The access a tool needs, or null when it is already granted or unknown on this version. */
     fun need(context: Context, id: String): PermissionNeed? {
         val item = items().firstOrNull { it.id == id } ?: return null
         if (item.granted(context)) return null
         return PermissionNeed(item.id, item.title, item.purpose, item.runtime())
     }
-    fun granted(context: Context, id: String): Boolean = items().firstOrNull { it.id == id }?.granted(context) ?: true
+    fun granted(context: Context, id: String): Boolean = if (id in setOf("accessibility", "workspace", "screenshots")) item(id)!!.granted(context)
+        else items().firstOrNull { it.id == id }?.granted(context) ?: (item(id) != null)
     /** Whether a tool's exact permissions are granted: its minimal [perms], or the access's special check when it has none. */
     fun toolGranted(context: Context, id: String, perms: List<String>): Boolean =
         if (perms.isNotEmpty()) perms.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED } else granted(context, id)
     /** The card to show for a blocked tool: the access's name and purpose, but only the permissions that tool needs. */
     fun toolNeed(context: Context, id: String, perms: List<String>): PermissionNeed? {
         if (toolGranted(context, id, perms)) return null
-        val item = items().firstOrNull { it.id == id }
-        return PermissionNeed(id, item?.title ?: id, item?.purpose ?: "", perms)
+        val item = item(id) ?: throw UserError("Неизвестный доступ: $id")
+        return PermissionNeed(id, item.title, item.purpose, perms)
     }
     /** The accesses this Android version has. */
     fun items(sdk: Int = Build.VERSION.SDK_INT): List<Item> = all.filter { sdk >= it.minSdk && (it.special != null || it.permissions(sdk).isNotEmpty()) }
     /** Runtime permissions of [group] still to ask, for «Запросить все» (background location must come after the rest). */
-    fun missing(context: Context, group: Group): List<String> = items().filter { it.group == group && it.special == null && it.id != "background_location" }
+    fun missing(context: Context, group: Group): List<String> = items().filter { it.group == group && it.runtime().isNotEmpty() && it.id != "background_location" }
         .flatMap { it.runtime() }.filter { context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }.distinct()
 }
