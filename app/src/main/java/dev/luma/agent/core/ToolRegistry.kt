@@ -41,6 +41,8 @@ data class Arg(val name: String, val type: ArgType, val description: String = ""
 data class ToolSpec(val name: String, val group: String, val summary: String, val args: List<Arg> = emptyList(),
     val result: String = "status", val permission: String = "", val checks: String = "",
     val sideEffect: Boolean = true, val screen: Boolean = false, val important: (JSONObject) -> Boolean = { false },
+    /** An OptionalAccess id this tool needs; the agent asks for it (a chat card) before the first use. Empty = none. */
+    val access: String = "",
     val label: (JSONObject) -> String = { summary }) {
     /** Compact signature for the JSON-command catalog: `volume {stream?:media|ring, level?:int}`. */
     fun signature(): String = name + if (args.isEmpty()) " {}" else args.joinToString(", ", " {", "}") { arg ->
@@ -197,6 +199,26 @@ object ToolRegistry {
         ToolSpec("wait", "screen", "подождать загрузки", listOf(a("ms", ArgType.INT, required = true, min = 0, max = 2000)), "ok", sideEffect = false, label = { "Жду обновления экрана" }),
         // Agent bookkeeping.
         ToolSpec("remember", "meta", "заменить рабочие заметки задачи (до 4000 символов)", listOf(a("notes", ArgType.STRING, required = true, maxLength = 4000)), "saved", sideEffect = false, label = { "Сохраняю заметки задачи" }),
+        // Tools that use the optional permissions. Each declares the access it needs; the agent asks for it (a chat card)
+        // before the first use. Acting on the world — a call, an SMS, a new event — waits for the user's confirmation.
+        ToolSpec("find_contacts", "phone", "найти контакты по имени: имена и номера", listOf(a("query", ArgType.STRING, "часть имени", required = true, maxLength = 100), a("limit", ArgType.INT, min = 1, max = 30)),
+            "contacts", "Контакты", sideEffect = false, access = "contacts", label = { "Ищу контакт «${it.s("query")}»" }),
+        ToolSpec("read_call_log", "phone", "последние звонки: кто, когда, тип, длительность", listOf(a("limit", ArgType.INT, min = 1, max = 50)),
+            "calls", "Журнал звонков", sideEffect = false, access = "call_log", label = { "Читаю журнал звонков" }),
+        ToolSpec("read_sms", "phone", "последние SMS (можно по контакту)", listOf(a("contact", ArgType.STRING, "имя или номер", maxLength = 100), a("limit", ArgType.INT, min = 1, max = 50)),
+            "messages", "SMS", sideEffect = false, access = "sms", label = { "Читаю SMS" }),
+        ToolSpec("send_sms", "phone", "отправить SMS на номер", listOf(a("number", ArgType.STRING, required = true, maxLength = 40), a("text", ArgType.STRING, required = true, maxLength = 1000)),
+            "status", "SMS", access = "sms", important = { true }, label = { "Отправить SMS на ${it.s("number")}" }),
+        ToolSpec("call_number", "phone", "позвонить на номер (найди его через find_contacts)", listOf(a("number", ArgType.STRING, required = true, maxLength = 40)),
+            "status", "Телефон", access = "phone", important = { true }, label = { "Позвонить ${it.s("number")}" }),
+        ToolSpec("get_location", "phone", "текущие координаты телефона и ссылка на карту", listOf(),
+            "latitude, longitude", "Местоположение", sideEffect = false, access = "location", label = { "Определяю местоположение" }),
+        ToolSpec("list_calendar", "phone", "ближайшие события календаря", listOf(a("days", ArgType.INT, min = 1, max = 60)),
+            "events", "Календарь", sideEffect = false, access = "calendar", label = { "Смотрю календарь" }),
+        ToolSpec("list_media", "phone", "список фото, видео или аудио телефона (только чтение)", listOf(a("type", ArgType.STRING, choices = listOf("image", "video", "audio")), a("limit", ArgType.INT, min = 1, max = 50)),
+            "files", "Медиатека", sideEffect = false, access = "photos", label = { "Смотрю медиатеку" }),
+        ToolSpec("app_usage", "phone", "сколько времени открыты приложения", listOf(a("days", ArgType.INT, min = 1, max = 30), a("limit", ArgType.INT, min = 1, max = 30)),
+            "apps", "Статистика использования", sideEffect = false, access = "usage", label = { "Смотрю статистику приложений" }),
         ToolSpec("describe_tool", "meta", "подробности инструмента: аргументы, результат, разрешения, доступность", listOf(a("name", ArgType.STRING, required = true, maxLength = 60)), "details", sideEffect = false, label = { "Уточняю инструмент ${it.s("name")}" }),
     )
     private val byName = specs.associateBy { it.name }

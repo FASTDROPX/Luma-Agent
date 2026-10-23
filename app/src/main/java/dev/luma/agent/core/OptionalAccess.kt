@@ -111,6 +111,23 @@ object OptionalAccess {
             screens = { screen(it, Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT) }),
     )
 
+    fun item(id: String): Item? = all.firstOrNull { it.id == id }
+    /** The access a tool needs, or null when it is already granted or unknown on this version. */
+    fun need(context: Context, id: String): PermissionNeed? {
+        val item = items().firstOrNull { it.id == id } ?: return null
+        if (item.granted(context)) return null
+        return PermissionNeed(item.id, item.title, item.purpose, item.runtime())
+    }
+    fun granted(context: Context, id: String): Boolean = items().firstOrNull { it.id == id }?.granted(context) ?: true
+    /** Whether a tool's exact permissions are granted: its minimal [perms], or the access's special check when it has none. */
+    fun toolGranted(context: Context, id: String, perms: List<String>): Boolean =
+        if (perms.isNotEmpty()) perms.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED } else granted(context, id)
+    /** The card to show for a blocked tool: the access's name and purpose, but only the permissions that tool needs. */
+    fun toolNeed(context: Context, id: String, perms: List<String>): PermissionNeed? {
+        if (toolGranted(context, id, perms)) return null
+        val item = items().firstOrNull { it.id == id }
+        return PermissionNeed(id, item?.title ?: id, item?.purpose ?: "", perms)
+    }
     /** The accesses this Android version has. */
     fun items(sdk: Int = Build.VERSION.SDK_INT): List<Item> = all.filter { sdk >= it.minSdk && (it.special != null || it.permissions(sdk).isNotEmpty()) }
     /** Runtime permissions of [group] still to ask, for «Запросить все» (background location must come after the rest). */

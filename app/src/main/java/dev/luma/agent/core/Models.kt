@@ -148,6 +148,8 @@ data class ChatMessage(val id: Long, val role: String, val text: String, val tim
     val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false, val search: WebSearch? = null)
 data class Conversation(val id: Long, val title: String, val updated: Long, val pinned: Boolean = false, val agent: Boolean = false)
 data class Approval(val title: String, val details: String, val background: Boolean = false)
+/** An access a tool needs that is off: the chat shows a «выдайте доступ» card, and the task continues once it is granted. */
+data class PermissionNeed(val id: String, val title: String, val purpose: String, val runtime: List<String> = emptyList())
 data class RunState(val active: Boolean = false, val paused: Boolean = false, val stage: String = "", val step: Int = 0,
     val chatId: Long = 0, val approval: Approval? = null, val error: String? = null, val retryPending: Boolean = false,
     /** SystemClock.elapsedRealtime() when the task started; drives the run timer. */
@@ -159,7 +161,9 @@ data class RunState(val active: Boolean = false, val paused: Boolean = false, va
     /** The agent has started acting (its first tool); until then the chat shows a plain «thinking» line, not the agent card. */
     val acting: Boolean = false,
     /** The task controls the screen or leaves Luma: only then the cursor, glow, Stop pill and floating panel appear. */
-    val screen: Boolean = false)
+    val screen: Boolean = false,
+    /** An access the current step needs that is off; the chat shows a card to grant it. */
+    val permission: PermissionNeed? = null)
 /** One agent step: what it did, how long the model and the action took, and whether it worked. */
 data class StepLog(val number: Int, val label: String, val millis: Long, val ok: Boolean, val outputPerSecond: Double? = null)
 fun formatSeconds(millis: Long): String = if (millis < 60_000) "%.1f с".format(java.util.Locale.ROOT, millis / 1000.0).replace('.', ',') else formatElapsed(millis)

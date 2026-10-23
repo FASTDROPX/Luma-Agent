@@ -175,8 +175,8 @@ class AgentController(private val context: Context, private val scope: Coroutine
             } catch (e: Exception) {
                 val message = safeError(e); chats.append(chat, "assistant", message); mutable.value = mutable.value.copy(error = message)
             } finally {
-                approval?.cancel(); approval = null;retry?.cancel();retry=null
-                mutable.value = mutable.value.copy(active = false, paused = false, approval = null,retryPending=false, stage = mutable.value.error?.let { "Нужна помощь" } ?: "Готово")
+                approval?.cancel(); approval = null;retry?.cancel();retry=null;access?.cancel();access=null
+                mutable.value = mutable.value.copy(active = false, paused = false, approval = null, permission = null, retryPending=false, stage = mutable.value.error?.let { "Нужна помощь" } ?: "Готово")
                 finished()
             }
         }
@@ -216,6 +216,16 @@ class AgentController(private val context: Context, private val scope: Coroutine
     internal suspend fun awaitAction() { awaitRunning(); if(!mutable.value.active) throw CancellationException("Задача остановлена") }
     private suspend fun awaitRunning() { while (mutable.value.paused) { kotlinx.coroutines.currentCoroutineContext().ensureActive(); delay(100) }; kotlinx.coroutines.currentCoroutineContext().ensureActive() }
     private fun update(stage: String, step: Int) { mutable.value = mutable.value.copy(stage = stage, step = step) }
+    private var access: CompletableDeferred<Unit>? = null
+    /** The chat card's grant button handled the request; re-check whether the access is now on. */
+    fun resumeAccess() { access?.complete(Unit) }
+    private suspend fun requestAccess(need: PermissionNeed): Boolean {
+        if (!mutable.value.acting) mutable.value = mutable.value.copy(acting = true)
+        val decision = CompletableDeferred<Unit>(); access = decision
+        mutable.value = mutable.value.copy(permission = need)
+        return try { decision.await(); OptionalAccess.toolGranted(context, need.id, need.runtime) }
+        finally { access = null; mutable.value = mutable.value.copy(permission = null) }
+    }
     private suspend fun requestApproval(value: Approval): Boolean {
         val decision = CompletableDeferred<Boolean>(); approval = decision; mutable.value = mutable.value.copy(approval = value)
         return try { decision.await() } finally { approval = null; mutable.value = mutable.value.copy(approval = null) }
@@ -273,9 +283,19 @@ class AgentController(private val context: Context, private val scope: Coroutine
     private suspend fun execute(tool: AgentReply.Tool): ToolResult {
         val args = tool.args
         val spec = ToolRegistry[tool.name] ?: throw ToolFailure(ToolStatus.ERROR, "Неизвестный инструмент.")
+        // A tool that needs an optional permission: ask for it (a chat card) before running, and continue once granted.
+        val accessId = spec.access.ifEmpty { if (tool.name == "list_media") PhoneTools.mediaAccess(args.optString("type", "image")) else "" }
+        if (accessId.isNotEmpty()) {
+            val perms = PhoneTools.permissions(tool.name, args)
+            val need = OptionalAccess.toolNeed(context, accessId, perms)
+            if (need != null && !requestAccess(need)) return ToolResult(JSONObject().put("status", ToolStatus.NEEDS_USER_ACTION)
+                .put("message", "Доступ «${need.title}» не выдан, поэтому «${spec.name}» не выполнен.")
+                .put("userAction", "Выдайте доступ в карточке в чате или выберите другой способ.").put("access", need.id))
+        }
         return when {
             spec.group == "files" -> ToolResult(FolderTools(context, vault.state.value.folder).run(tool.name, args))
             tool.name in setOf("create_reminder", "list_reminders", "cancel_reminder") -> ToolResult(withContext(Dispatchers.IO) { ReminderStore(context).run(tool.name, args) })
+            spec.group == "phone" -> ToolResult(PhoneTools(context).run(tool.name, args))
             spec.group == "device" || spec.group == "time" || spec.group == "apps" -> {
                 val result = DeviceTools(context).run(tool.name, args)
                 // Opening an app or a link changes the screen; its fresh tree comes with the result.
