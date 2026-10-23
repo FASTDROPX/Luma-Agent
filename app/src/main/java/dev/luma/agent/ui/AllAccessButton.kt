@@ -48,7 +48,7 @@ import dev.luma.agent.core.OptionalAccess
     },confirmButton={TextButton(onClick={
         intro=false; running=true
         queue=buildList {
-            OptionalAccess.items().filter { (it.runtime().isEmpty() || it.id=="background_location") && !it.granted(context) }.sortedBy {if(it.id=="background_location") 0 else 1}.forEach { add(it.id) }
+            OptionalAccess.items().filter { (it.runtime().isEmpty() || it.id=="background_location") && !it.granted(context) }.sortedBy {when {it.id=="background_location" && Build.VERSION.SDK_INT==29 -> 0;it.id=="battery" -> 1;else -> 2}}.forEach { add(it.id) }
             if(graph.vault.state.value.folder.isBlank()) add("workspace")
             if(!OptionalAccess.granted(context,"accessibility")) add("accessibility")
         }

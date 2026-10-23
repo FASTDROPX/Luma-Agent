@@ -256,8 +256,9 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                 pointAtNode(args)
                 val target=node(args)
                 // A WebView label often has no ACTION_CLICK. Clicking a distant clickable ancestor can
-                // activate the site header instead of the result title. Fall back to a finger on THIS label.
-                if (!target.isClickable || !target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                // activate the site header instead of the result title. Web content and non-clickable
+                // labels get a single physical tap on THIS label, even if WebView advertises ACTION_CLICK.
+                if (ScreenTapTarget.needsGesture(target) || !target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                     val rect=Rect();target.getBoundsInScreen(rect)
                     if(!rect.intersect(0,0,physicalWidth,physicalHeight) || rect.isEmpty) throw UserError("Элемент за пределами экрана. Обновите screen.")
                     gesture(rect.exactCenterX(),rect.exactCenterY(),rect.exactCenterX(),rect.exactCenterY(),80) {graph.agent.awaitAction();node(args)}
@@ -406,16 +407,6 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         repeat(7) {
             val node = current ?: return false
             if (node.isLongClickable && node.isEnabled && node.isVisibleToUser && node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)) return true
-            current = node.parent
-        }
-        return false
-    }
-    private fun click(target: AccessibilityNodeInfo): Boolean {
-        if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
-        var current: AccessibilityNodeInfo? = target.parent
-        repeat(6) {
-            val node = current ?: return false
-            if (node.isClickable && node.isEnabled && node.isVisibleToUser && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
             current = node.parent
         }
         return false
