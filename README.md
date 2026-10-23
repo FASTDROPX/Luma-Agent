@@ -388,6 +388,11 @@ LUMA_SIGN_PASS=... python3 tools/package.py --sdk /path/to/sdk --keystore /outsi
 v2/v3; создаёт APK, SHA-256 и архив исходников без локальных данных/секретов.
 Пароль обязательно передаётся через LUMA_SIGN_PASS. Ключ подписи хранится вне проекта.
 
+Релиз можно собрать в GitHub Actions: workflow `Release` запускается тегом `v<версия>`,
+прогоняет тесты и Lint, подписывает APK ключом из секретов репозитория
+(`LUMA_KEYSTORE_BASE64`, `LUMA_SIGN_PASS`, необязательно `LUMA_KEY_ALIAS`), проверяет, что
+это тот же ключ, что у прошлых версий, и публикует APK, `.sha256` и архив исходников.
+
 Результаты и границы проверки — [BUILD_REPORT.md](BUILD_REPORT.md).
 Рендер Robolectric Native Graphics — `app/build/previews`. Реальное устройство,
 частота кадров, инъекция Accessibility-жестов и запросы с пользовательским ключом

@@ -36,7 +36,7 @@ object DeviceCapabilities {
         val connect = sdk < 31 || has(Manifest.permission.BLUETOOTH_CONNECT)
         val bluetooth = runCatching { context.getSystemService(BluetoothManager::class.java)?.adapter }.getOrNull() != null
         val nfc = runCatching { NfcAdapter.getDefaultAdapter(context) }.getOrNull() != null
-        val exact = sdk < 31 || runCatching { context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms() }.getOrDefault(false)
+        val exact = Build.VERSION.SDK_INT < 31 || runCatching { context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms() }.getOrDefault(false)
         val notify = sdk < 33 || has(Manifest.permission.POST_NOTIFICATIONS)
         val clock = handles(Intent(AlarmClock.ACTION_SET_ALARM)) || handles(Intent(AlarmClock.ACTION_SET_TIMER))
         val calendar = handles(Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI))

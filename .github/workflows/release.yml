@@ -1,0 +1,83 @@
+name: Release
+
+# Builds, signs and publishes a release for a version tag (v0.8.0 …).
+# Needs repository secrets: LUMA_KEYSTORE_BASE64 (the .p12 keystore, base64),
+# LUMA_SIGN_PASS (its password) and optionally LUMA_KEY_ALIAS (default "luma").
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release, e.g. v0.8.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      # SHA-256 of the certificate that signed 0.6.0 and 0.7.0. Releases signed with another key
+      # would not install over the previous version, so publishing stops instead.
+      EXPECTED_CERT_SHA256: cd92be7b3608c3a6659983546c8af41ffe449e477a459ea42440b9ba9971490e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Check signing secrets
+        env:
+          KEYSTORE: ${{ secrets.LUMA_KEYSTORE_BASE64 }}
+          PASS: ${{ secrets.LUMA_SIGN_PASS }}
+        run: |
+          if [ -z "$KEYSTORE" ] || [ -z "$PASS" ]; then
+            echo "::error::Add LUMA_KEYSTORE_BASE64 and LUMA_SIGN_PASS in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Tests, lint and release build
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+      - name: Sign and package
+        env:
+          KEYSTORE: ${{ secrets.LUMA_KEYSTORE_BASE64 }}
+          LUMA_SIGN_PASS: ${{ secrets.LUMA_SIGN_PASS }}
+          ALIAS: ${{ secrets.LUMA_KEY_ALIAS }}
+        run: |
+          store="$RUNNER_TEMP/luma.p12"
+          printf '%s' "$KEYSTORE" | base64 -d > "$store"; chmod 600 "$store"
+          python3 tools/package.py --sdk "$ANDROID_HOME" --keystore "$store" --alias "${ALIAS:-luma}"
+          rm -f "$store"
+      - name: Check version and signing key
+        run: |
+          version=$(python3 -c "import json;print(json.load(open('app/build/outputs/apk/release/output-metadata.json'))['elements'][0]['versionName'])")
+          [ "v$version" = "$TAG" ] || { echo "::error::Tag $TAG does not match versionName $version"; exit 1; }
+          apk="dist/Luma-Agent-$version.apk"
+          cert=$(java -jar "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          [ "$cert" = "$EXPECTED_CERT_SHA256" ] || { echo "::error::APK is signed with $cert, not the key of previous releases"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'EOF'
+          import os, re
+          version = os.environ["VERSION"]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          match = re.search(r"^## " + re.escape(version) + r"\b.*?\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+          body = match.group(1).strip() if match else ""
+          head = "Подписан тем же ключом, что 0.7.0: поверх старой версии ставится без удаления. SHA-256 APK — в .sha256."
+          tail = "Полный список изменений — [CHANGELOG.md](https://github.com/FASTDROPX/Luma-Agent/blob/main/CHANGELOG.md)."
+          open(os.environ["RUNNER_TEMP"] + "/notes.md", "w", encoding="utf-8").write(head + "\n\n" + body + "\n\n" + tail + "\n")
+          EOF
+          gh release create "$TAG" "dist/Luma-Agent-$VERSION.apk" "dist/Luma-Agent-$VERSION.apk.sha256" "dist/Luma-Agent-$VERSION-source.zip" \
+            --title "Luma Agent $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
