@@ -40,8 +40,8 @@ import kotlin.math.roundToInt
     MotionLazyColumn(Modifier.fillMaxSize().screenMotionBlur(transition).testTag("settings-list"), contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
         item {
             if(visiblePage.isNotEmpty()) TextButton(onClick={page=""}) { Icon(Icons.Outlined.ArrowBack,null);Spacer(Modifier.width(8.dp));Text("Все настройки") }
-            PageTitle("НАСТРОЙКИ",when(visiblePage) {"theme"->"Оформление";"effects"->"Эффекты";"model"->"Параметры модели";"prompt"->"Системный промпт";"agent"->"Управление";else->"Общие"},
-                when(visiblePage) {"theme"->"Тема, цвета и показ скорости генерации.";"effects"->"Анимации, сфера и свечение во время работы агента.";"model"->"Сохраняются отдельно для каждой модели.";"prompt"->"Инструкции для выбранной модели.";"agent"->"Доступ, подтверждения и пределы задачи.";else->"Внешний вид, модель и работа агента."})
+            PageTitle("НАСТРОЙКИ",when(visiblePage) {"theme"->"Оформление";"effects"->"Эффекты";"model"->"Параметры модели";"prompt"->"Системный промпт";"agent"->"Управление";"search"->"Поиск в интернете";else->"Общие"},
+                when(visiblePage) {"theme"->"Тема, цвета и показ скорости генерации.";"effects"->"Анимации, сфера и свечение во время работы агента.";"model"->"Сохраняются отдельно для каждой модели.";"prompt"->"Инструкции для выбранной модели.";"agent"->"Доступ, подтверждения и пределы задачи.";"search"->"Как модели ищут в интернете.";else->"Внешний вид, модель и работа агента."})
         }
         when(visiblePage) {
             "" -> {
@@ -49,6 +49,7 @@ import kotlin.math.roundToInt
                 item { SettingsLink("Эффекты","Motion blur, частицы и плавный ввод",Icons.Outlined.AutoAwesome) {page="effects"} }
                 item { SettingsLink("Параметры модели",if(model.isBlank()) "Сначала подключи модель" else "${provider.label} · $model",Icons.Outlined.Tune) {page="model"} }
                 item { SettingsLink("Управление","Курсор, подтверждения и лимиты",Icons.Outlined.TouchApp) {page="agent"} }
+                item { SettingsLink("Поиск в интернете",if(!settings.webSearch) "Выключен" else if(settings.search.native(provider)) "${provider.label} ищет сам" else "Через ${WebSearchSettings.label(settings.search.engine)}",Icons.Outlined.TravelExplore) {page="search"} }
                 item { SoftCard {
                     Icon(Icons.Outlined.Lock,null,tint=MaterialTheme.colorScheme.primary)
                     Text("Данные остаются на телефоне",style=MaterialTheme.typography.titleMedium)
@@ -186,6 +187,7 @@ import kotlin.math.roundToInt
                     Text("Новые лимиты применяются при следующем запуске. Задачу можно остановить раньше.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 } }
             }
+            "search" -> item { SearchSettingsCards(graph) }
         }
     }
     }

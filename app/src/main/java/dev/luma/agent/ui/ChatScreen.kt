@@ -41,7 +41,6 @@ import dev.luma.agent.core.AttachmentStore
 import dev.luma.agent.core.safeError
 import dev.luma.agent.core.ChatMessage
 import dev.luma.agent.core.RunState
-import dev.luma.agent.core.WebSearch
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlin.math.roundToInt
@@ -114,7 +113,8 @@ import kotlin.math.roundToInt
     LaunchedEffect(lastFailed) {if(lastFailed!=null && System.currentTimeMillis()-(messages.lastOrNull()?.timestamp ?: 0)<5000) rootView.haptic(Haptic.Error,haptics)}
     val relevantRun=run.active && run.chatId==selected
     val pending=busy && !run.active && messages.lastOrNull()?.role!="assistant"
-    val searching=settings.webSearch && WebSearch.supported(settings.provider)
+    val searching=settings.webSearch
+    val chatStatus by graph.chatStatus.collectAsStateWithLifecycle()
     val latestAnswer=messages.lastOrNull {it.role=="assistant"}?.id
     var origin by remember {mutableStateOf(Offset.Zero)}
     var home by remember {mutableStateOf(Offset.Unspecified)}
@@ -177,7 +177,7 @@ import kotlin.math.roundToInt
                     if(pending) item(key="thinking") {
                         Row(Modifier.animateItem(fadeInSpec=null,placementSpec=null,fadeOutSpec=null).fillMaxWidth().heightIn(min=48.dp).padding(start=52.dp).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+it.size.height/2f)},verticalAlignment=Alignment.CenterVertically) {
                             val elapsed=rememberElapsed(chatStartedAt)
-                            Text(if(searching) "Ищу в интернете и готовлю ответ…" else "Готовлю ответ…",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(chatStatus ?: if(searching) "Ищу в интернете и готовлю ответ…" else "Готовлю ответ…",Modifier.weight(1f,fill=false),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
                             if(elapsed>=1000) Text("  ${dev.luma.agent.core.formatElapsed(elapsed)}",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f))
                         }
                     }
@@ -222,11 +222,8 @@ import kotlin.math.roundToInt
                 Row(Modifier.padding(start=4.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
                     FilterChip(!asAgent,{graph.setAgentMode(false)},label={Text("Чат")},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(15.dp))})
                     FilterChip(asAgent,{graph.setAgentMode(true)},label={Text("Агент")},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(15.dp))})
-                    // Web search for chat replies; DeepSeek's API and local servers have none.
-                    if(!asAgent) FilterChip(searching,{
-                        if(WebSearch.supported(settings.provider)) graph.update {it.copy(webSearch=!it.webSearch)}
-                        else graph.uiMessage.value="У провайдера ${settings.provider.label} нет поиска в интернете через API. Он есть у Gemini, Claude, OpenAI и OpenRouter."
-                    },label={Text("Поиск")},leadingIcon={Icon(Icons.Outlined.TravelExplore,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-web-search"))
+                    // Web search for chat replies: the provider's own, or through Luma for any model.
+                    if(!asAgent) FilterChip(searching,{graph.update {it.copy(webSearch=!it.webSearch)}},label={Text("Поиск")},leadingIcon={Icon(Icons.Outlined.TravelExplore,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-web-search"))
                     Spacer(Modifier.weight(1f))
                     if(asAgent) IconButton(onClick=openAccess) {Icon(Icons.Outlined.Security,"Доступ агента",Modifier.size(20.dp))}
                 }

@@ -33,6 +33,10 @@ class AppGraph(val context: Context) {
     val chatBusy = MutableStateFlow(false)
     /** SystemClock.elapsedRealtime() when the current chat request started; 0 when idle. */
     val chatStartedAt = MutableStateFlow(0L)
+    /** What a chat reply with web search is doing now ("Ищу: …", "Читаю: …"); null otherwise. */
+    val chatStatus = MutableStateFlow<String?>(null)
+    /** Result of «Проверить поиск» in settings. */
+    val searchCheck = MutableStateFlow(ConnectionCheck())
     val uiMessage = MutableStateFlow<String?>(null)
     val overlayVisible=MutableStateFlow(false)
     val sharedContent=MutableStateFlow<SharedContent?>(null)
@@ -114,12 +118,33 @@ class AppGraph(val context: Context) {
     /** Asks the model for the next answer of [chat] from its history and stores text, reasoning and pictures. */
     private suspend fun answer(chat: Long) {
         val settings = vault.state.value; val connection = settings.connection()
-        val reply = api.generateDetailed(settings.provider, connection, chats.history(chat, connection.generation().contextTurns).dropWhile { it.role != "user" }, ModelPrompts.chat(connection, settings.formal),
-            webSearch = settings.webSearch)
+        val turns = chats.history(chat, connection.generation().contextTurns).dropWhile { it.role != "user" }
+        val system = ModelPrompts.chat(connection, settings.formal)
+        val painter = connection.models.firstOrNull { it.id == connection.model }?.imageOutput == true
+        // Search: the provider's own where it has one (unless Luma's is chosen), Luma's tools for every other model.
+        val reply = if (settings.webSearch && !painter && !settings.search.native(settings.provider)) try {
+            SearchingChat(api, WebTools(settings.search)).answer(settings.provider, connection, turns, system, today()) { chatStatus.value = it }
+        } finally { chatStatus.value = null }
+        else api.generateDetailed(settings.provider, connection, turns, system, webSearch = settings.webSearch)
         val (text, inline) = GeneratedImage.extractInline(reply.text)
         val pictures = (reply.images + inline).take(8).mapIndexed { i, image -> chats.attachments.store("Изображение ${i + 1}.${image.extension}", image.mime, image.bytes) }
         chats.append(chat, "assistant", text, pictures, reply.reasoning, reply.stats, search = reply.search)
         chats.addUsage(chat, reply.stats)
+    }
+    private fun today(): String = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy, EEEE", java.util.Locale("ru")))
+    /** «Проверить поиск»: one real search with the engine from settings. */
+    fun checkSearch() {
+        if (searchCheck.value.busy) return
+        searchCheck.value = ConnectionCheck(busy = true)
+        val engine = vault.state.value.search
+        scope.launch {
+            searchCheck.value = try {
+                val started = android.os.SystemClock.elapsedRealtime()
+                val hits = WebTools(engine).search("погода Москва")
+                if (hits.isEmpty()) ConnectionCheck(error = "Поиск ответил, но ничего не нашёл.")
+                else ConnectionCheck(reply = "Найдено ${WebSearch.pages(hits.size)} за ${"%.1f".format(java.util.Locale("ru"), (android.os.SystemClock.elapsedRealtime() - started) / 1000.0)} с: ${hits.first().title.take(80)}")
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { ConnectionCheck(error = safeError(e)) }
+        }
     }
     private suspend fun fail(chat: Long?, e: Exception) {
         uiMessage.value = safeError(e)

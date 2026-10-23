@@ -127,7 +127,8 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
         val painterModel = connection.models.firstOrNull { it.id == connection.model }?.imageOutput == true
         val painter = !agent && painterModel
         if (agent && painterModel && provider == Provider.OPENAI) throw UserError("Эта модель только рисует картинки. Для агента выберите текстовую модель.")
-        val native = agent && !tools.isNullOrEmpty()
+        // Native function calling: the agent's phone tools, or web_search/read_page in a chat reply.
+        val native = !tools.isNullOrEmpty() && !painter
         val prepared=(if (native) turns else turns.map(::plainTurn)).mapIndexed {index,turn ->
             // Only Gemini accepts pictures in the model's own turns; elsewhere an earlier generated picture becomes a note.
             val own = turn.role == "assistant" && provider != Provider.GEMINI
