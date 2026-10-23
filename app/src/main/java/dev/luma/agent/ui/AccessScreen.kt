@@ -102,6 +102,7 @@ import dev.luma.agent.*
             }
         }
         item { SystemActionsCard(context, resumed, nearby = { nearby.launch(Manifest.permission.BLUETOOTH_CONNECT) }) }
+        item { BackgroundCard(context, resumed) { graph.uiMessage.value = it } }
         if (Build.VERSION.SDK_INT >= 33) item {
             AccessCard(Icons.Outlined.NotificationsNone, "Уведомление о работе", "Статус задачи и остановка из шторки", notificationsAllowed, if (notificationsAllowed) "Настройки уведомлений" else "Разрешить уведомления", requestNotification)
         }
@@ -173,6 +174,32 @@ import dev.luma.agent.*
         if (Build.VERSION.SDK_INT >= 31) PermissionRow(Icons.Outlined.Alarm, "Будильники и напоминания", if (exact) "Напоминания Luma точно в срок" else "Без него напоминание может прийти с опозданием до 10 минут", exact, "system-exact-alarms") {
             open(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pkg)) }
         Text("Wi‑Fi, мобильный интернет и NFC Android 10+ переключает только в своей панели; геолокацию, авиарежим и точку доступа — только в настройках. Luma откроет нужное место, а переключите вы.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+/** Optional: Luma keeps working with the screen off or in another app. Each item opens Android's own screen. */
+@Composable private fun BackgroundCard(context: android.content.Context, resumed: Int, message: (String) -> Unit) {
+    val status = remember(resumed) { dev.luma.agent.core.BackgroundAccess.status(context) }
+    fun open(intents: List<Intent>) { if (!dev.luma.agent.core.BackgroundAccess.open(context, intents)) message("Откройте настройки → Приложения → Luma вручную.") }
+    SoftCard {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Работа в фоне", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Text("необязательно", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("Без этого агент тоже работает, но Android может приостановить долгую задачу или ответ локальной модели, когда экран выключен или открыто другое приложение. " +
+            "Заряд расходуется только во время задачи.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        PermissionRow(Icons.Outlined.BatteryChargingFull, "Без ограничений батареи",
+            if (status.unrestrictedBattery) "Включено: Android не усыпит задачу" else "Отключить энергосбережение для Luma", status.unrestrictedBattery, "background-battery") {
+            open(dev.luma.agent.core.BackgroundAccess.batteryRequest(context)) }
+        if (Build.VERSION.SDK_INT >= 28) PermissionRow(Icons.Outlined.Block, "Фоновая активность",
+            if (status.backgroundRestricted) "Ограничена в настройках Android — снимите ограничение" else "Разрешена", !status.backgroundRestricted, "background-activity") {
+            open(dev.luma.agent.core.BackgroundAccess.appSettings(context)) }
+        PermissionRow(Icons.Outlined.DataSaverOff, "Экономия трафика",
+            if (status.dataSaverBlocks) "Запрещает Luma интернет в фоне — разрешите исключение" else "Не мешает Luma", !status.dataSaverBlocks, "background-data") {
+            open(dev.luma.agent.core.BackgroundAccess.dataSaver(context)) }
+        dev.luma.agent.core.BackgroundAccess.vendorHint()?.let { hint ->
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = { open(dev.luma.agent.core.BackgroundAccess.appSettings(context)) }) { Text("Открыть настройки Luma") }
+        }
     }
 }
 @Composable private fun PermissionRow(icon: ImageVector, title: String, subtitle: String, granted: Boolean, tag: String, click: () -> Unit) {
