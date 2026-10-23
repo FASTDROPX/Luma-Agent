@@ -84,7 +84,7 @@ internal class AgentVisualOverlay(private val service: AgentAccessibilityService
                 if(canvas==null && stopButton==null) show()
                 canvas?.configure(run,s)
                 updateStop()
-            }
+            } else { leave() }
         }}
         // Run time and token speed tick on the Stop button while the task is active.
         scope.launch {while(true) {delay(1000);if(current.active) updateStop()}}

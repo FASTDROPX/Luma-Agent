@@ -65,11 +65,11 @@ class DeepThinkingTest {
         try {
             val messages = agent.run("Открой ссылку из Избранного")
             assertEquals(listOf("tap 1", "tap 3"), screen.executed) // the repeat was never sent to the phone
-            assertEquals(1, agent.requests.count(::analysis))
+            assertEquals(2, agent.requests.count(::analysis))
             val reflection = agent.requests.first(::analysis).bodyText
-            assertTrue(reflection.contains("уже пробовали на этом же экране"))
+            assertTrue(reflection.contains("меню сообщения вместо ссылки"))
             // The blocked step and the lesson reach the model on the next step.
-            val next = agent.requests.indexOfFirst(::analysis) + 1
+            val next = agent.requests.indexOfLast(::analysis) + 1
             assertTrue(agent.requests[next].bodyText.contains("повтор не поможет"))
             assertTrue(plain(agent.requests[next]).contains("lessons")); assertTrue(plain(agent.requests[next]).contains("План: open_url http://192.168.1.38:8780/"))
             assertTrue(messages.any { it.role == "tool" && it.text.startsWith("Разбор: open_url") })

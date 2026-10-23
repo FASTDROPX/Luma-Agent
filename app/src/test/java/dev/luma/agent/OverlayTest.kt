@@ -35,13 +35,16 @@ class OverlayTest {
         graph.vault.update {it.copy(panel=false,visuals=it.visuals.copy(cursor=false,edgeGlow=false))}
         val api=ProviderClient {JSONObject("""{"candidates":[{"content":{"parts":[{"text":"{\"type\":\"tool\",\"tool\":\"tap\",\"args\":{\"node\":1}}"}]}}]}""")}
         val jobScope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
-        val controller=AgentController(app,jobScope,graph.vault,graph.chats,api)
+        val controller=AgentController(app,jobScope,graph.vault,graph.chats,api).also { c -> val driver = FakeScreen(); c.screen = { driver } }
         val done=CompletableDeferred<Unit>()
         val service=Robolectric.buildService(AgentAccessibilityService::class.java).create().get()
         val overlay=AgentVisualOverlay(service,graph,controller)
         try {
             val id=graph.chats.ensure("overlay test");controller.start(id,"test") {done.complete(Unit)}
             withTimeout(5000) {controller.state.first {it.approval!=null}}
+            assertFalse(controller.state.value.screen) // confirmation alone must not activate phone UI
+            controller.decide(true)
+            withTimeout(5000) { controller.state.first { it.screen } }
             overlay.bind();shadowOf(android.os.Looper.getMainLooper()).idle()
             val layer=overlay.canvas!!;val stop=overlay.stopButton!!
             assertEquals(View.VISIBLE,stop.visibility)

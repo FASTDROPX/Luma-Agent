@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -98,15 +99,53 @@ import kotlin.math.roundToInt
     }
     val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) {importUris(it)}
     // «Выдайте доступ» card: a runtime permission goes through Android's dialog; a special access opens its settings screen.
-    val permissionLauncher=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {graph.agent.resumeAccess()}
+    var requestedPermissions by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    val permissionLauncher=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        graph.agent.resumeAccess()
+        if (requestedPermissions.any { result[it] != true } && requestedPermissions.any { (context as? Activity)?.shouldShowRequestPermissionRationale(it) == false }) {
+            graph.uiMessage.value = "Доступ не выдан. Если Android больше не спрашивает, включите его в настройках Luma."
+            dev.luma.agent.core.BackgroundAccess.open(context, dev.luma.agent.core.OptionalAccess.appDetails(context))
+        }
+    }
+    var systemActionId by rememberSaveable { mutableStateOf<String?>(null) }
+    val toolActivity = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        systemActionId?.let { graph.agent.completeSystemAction(it, dev.luma.agent.core.SystemToolResult(result.resultCode, result.data)) }; systemActionId = null
+    }
+    val toolSender = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        systemActionId?.let { graph.agent.completeSystemAction(it, dev.luma.agent.core.SystemToolResult(result.resultCode, result.data)) }; systemActionId = null
+    }
+    fun launchToolAction(action: dev.luma.agent.core.SystemToolAction) {
+        if (systemActionId != null) return
+        systemActionId = action.id
+        try {
+            if (action.sender != null) toolSender.launch(androidx.activity.result.IntentSenderRequest.Builder(action.sender).build())
+            else action.intent?.let { toolActivity.launch(it) }
+        } catch (e: Exception) {
+            graph.uiMessage.value = "Android не смог открыть приложение для этого действия."
+            graph.agent.completeSystemAction(action.id, dev.luma.agent.core.SystemToolResult(Activity.RESULT_CANCELED)); systemActionId = null
+        }
+    }
+    val workspacePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) scope.launch {
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                graph.vault.update { it.copy(folder = uri.toString()) }; graph.agent.resumeAccess()
+            } catch (e: Exception) { graph.uiMessage.value = "Не удалось сохранить доступ к выбранной папке." }
+        }
+    }
     fun grantAccess(need: dev.luma.agent.core.PermissionNeed) {
-        if(need.runtime.isNotEmpty()) permissionLauncher.launch(need.runtime.toTypedArray())
-        else {dev.luma.agent.core.BackgroundAccess.open(context,dev.luma.agent.core.OptionalAccess.item(need.id)?.screens(context) ?: dev.luma.agent.core.OptionalAccess.appDetails(context))}
+        val runtime = need.runtime
+        if (need.id == "workspace") { workspacePicker.launch(null); return }
+        if (need.id == "screenshots") { scope.launch { graph.vault.update { it.copy(screenshots = true) }; graph.agent.resumeAccess() }; return }
+        if (need.id == "background_location" && android.os.Build.VERSION.SDK_INT >= 30)
+            dev.luma.agent.core.BackgroundAccess.open(context, dev.luma.agent.core.OptionalAccess.appDetails(context))
+        else if(runtime.isNotEmpty()) { requestedPermissions = runtime; permissionLauncher.launch(runtime.toTypedArray()) }
+        else dev.luma.agent.core.BackgroundAccess.open(context,dev.luma.agent.core.OptionalAccess.item(need.id)?.screens(context) ?: dev.luma.agent.core.OptionalAccess.appDetails(context))
     }
     // Coming back from a settings screen (special access): re-check whether it is now on.
     val lifecycleOwner=androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
-        val observer=androidx.lifecycle.LifecycleEventObserver {_,event->if(event==androidx.lifecycle.Lifecycle.Event.ON_RESUME && graph.agent.state.value.permission?.runtime?.isEmpty()==true) graph.agent.resumeAccess()}
+        val observer=androidx.lifecycle.LifecycleEventObserver {_,event->if(event==androidx.lifecycle.Lifecycle.Event.ON_RESUME && graph.agent.state.value.permission!=null) graph.agent.resumeAccess()}
         lifecycleOwner.lifecycle.addObserver(observer);onDispose {lifecycleOwner.lifecycle.removeObserver(observer)}
     }
     // Share → Luma: the text goes into the field, files and pictures become attachments.
@@ -125,7 +164,7 @@ import kotlin.math.roundToInt
     LaunchedEffect(lastFailed) {if(lastFailed!=null && System.currentTimeMillis()-(messages.lastOrNull()?.timestamp ?: 0)<5000) rootView.haptic(Haptic.Error,haptics)}
     val relevantRun=run.active && run.chatId==selected
     // In agent mode the task looks like a chat reply until the agent actually does something.
-    val agentThinking=relevantRun && !run.acting && run.approval==null && run.permission==null && !run.paused && !run.retryPending
+    val agentThinking=relevantRun && !run.acting && run.approval==null && run.permission==null && run.systemAction==null && !run.paused && !run.retryPending
     val pending=(busy && !run.active && messages.lastOrNull()?.role!="assistant") || agentThinking
     val searching=settings.webSearch
     val chatStatus by graph.chatStatus.collectAsStateWithLifecycle()
@@ -197,7 +236,7 @@ import kotlin.math.roundToInt
                     }
                     if(relevantRun && !agentThinking) item(key="agent") {
                         Box(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(260),placementSpec=if(reduced) null else spring(stiffness=Spring.StiffnessMediumLow),fadeOutSpec=null)) {
-                            RunCard(run,approve={rootView.haptic(Haptic.Confirm,settings.haptics);scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},grantAccess=::grantAccess,skipAccess={graph.agent.resumeAccess()},elapsed=rememberElapsed(run.startedAt),stats=tokenStats.takeIf {settings.tokenMeter},meterActive=settings.tokenMeter,
+                            RunCard(run,approve={rootView.haptic(Haptic.Confirm,settings.haptics);scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},grantAccess=::grantAccess,skipAccess={graph.agent.skipAccess()},fallbackAccess={graph.agent.continueWithoutAccess()},launchSystemAction=::launchToolAction,systemActionBusy=systemActionId!=null,elapsed=rememberElapsed(run.startedAt),stats=tokenStats.takeIf {settings.tokenMeter},meterActive=settings.tokenMeter,
                                 orbSlot=Modifier.onGloballyPositioned {c ->answer=c.positionInRoot()+Offset(c.size.width/2f,c.size.height/2f)-origin})
                         }
                     }
@@ -242,7 +281,7 @@ import kotlin.math.roundToInt
                     // «Глубокие размышления»: after a failed step the agent analyses it and tries another way.
                     if(asAgent) FilterChip(settings.deepThinking,{graph.update {it.copy(deepThinking=!it.deepThinking)}},label={Text("Размышления")},
                         leadingIcon={Icon(Icons.Outlined.Psychology,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-deep-thinking"))
-                    if(!asAgent) FilterChip(searching,{graph.update {it.copy(webSearch=!it.webSearch)}},label={Text("Поиск")},leadingIcon={Icon(Icons.Outlined.TravelExplore,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-web-search"))
+                    FilterChip(searching,{graph.update {it.copy(webSearch=!it.webSearch)}},label={Text("Поиск")},leadingIcon={Icon(Icons.Outlined.TravelExplore,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-web-search"))
                   }
                     if(asAgent) IconButton(onClick=openAccess) {Icon(Icons.Outlined.Security,"Доступ агента",Modifier.size(20.dp))}
                 }
@@ -353,7 +392,7 @@ import kotlin.math.roundToInt
 }
 @Composable fun Thinking(label: String) {Text(label,Modifier.padding(8.dp),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)}
 @Composable fun RunCard(run: RunState, approve: () -> Unit, reject: () -> Unit, pause: () -> Unit, stop: () -> Unit, maxSteps: Int = 20,retry: ()->Unit={},
-    grantAccess: (dev.luma.agent.core.PermissionNeed)->Unit={}, skipAccess: ()->Unit={},
+    grantAccess: (dev.luma.agent.core.PermissionNeed)->Unit={}, skipAccess: ()->Unit={}, fallbackAccess: ()->Unit={}, launchSystemAction: (dev.luma.agent.core.SystemToolAction)->Unit={}, systemActionBusy: Boolean=false,
     elapsed: Long = 0, stats: dev.luma.agent.core.TokenStats? = null, meterActive: Boolean = false, orbSlot: Modifier = Modifier) {
     SoftCard(Modifier.animateContentSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -367,14 +406,23 @@ import kotlin.math.roundToInt
         AnimatedContent(run.approval?.title ?: run.stage, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(120)) }, label = "run stage") { stage ->
             Text(t(stage), style = MaterialTheme.typography.bodyMedium)
         }
-        if (run.approval == null && run.permission == null) RunLog(run.log)
+        if (run.approval == null && run.permission == null && run.systemAction == null) RunLog(run.log)
         run.permission?.let { need ->
             Text(need.purpose, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Без доступа «${need.title}» этот шаг не выполнить. Выдайте его, чтобы Luma продолжила, или пропустите.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Выдайте доступ «${need.title}» для продолжения. После выдачи Luma продолжит этот шаг автоматически.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { grantAccess(need) }, modifier = Modifier.weight(1f).testTag("grant-access")) { Icon(Icons.Outlined.LockOpen, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Выдать доступ") }
                 OutlinedButton(onClick = skipAccess, modifier = Modifier.weight(1f)) { Text("Пропустить") }
             }
+        }
+        run.permission?.fallback?.let { alternative ->
+            Text(alternative, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = fallbackAccess, modifier = Modifier.fillMaxWidth().testTag("continue-without-access")) { Text("Продолжить без доступа") }
+        }
+        run.systemAction?.let { action ->
+            Text(action.title, style = MaterialTheme.typography.bodyMedium)
+            Text("Продолжите в системном окне. После возвращения Luma проверит результат.", style = MaterialTheme.typography.bodySmall)
+            Button(onClick = { launchSystemAction(action) }, enabled = !systemActionBusy, modifier = Modifier.fillMaxWidth().testTag("system-tool-action")) { Text(if (systemActionBusy) "Ожидаю результат Android" else "Продолжить") }
         }
         run.approval?.let { approval ->
             Text(t(approval.details), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

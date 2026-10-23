@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import dev.luma.agent.core.*
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
@@ -99,19 +101,23 @@ class WorkspaceFilesTest {
         } finally { agent.close() }
     }
 
-    @Test fun missingFolderEndsTheTaskAtOnceWithoutSearchingTheScreen() {
+    @Test fun missingFolderShowsACardAndCanBeSkippedWithoutOpeningTheScreen() {
         for (missing in listOf("", "content://dev.luma.missing/tree/primary%3AX")) {
-            val agent = AgentRun(context, configure = { it.copy(confirmActions = false, folder = missing) }) { _, _ ->
-                Replies.openAiCall("write_text", JSONObject().put("path", "test.txt").put("text", "x"))
+            var card = false
+            val agent = AgentRun(context, configure = { it.copy(confirmActions = false, folder = missing) }) { step, _ ->
+                if (step == 0) Replies.openAiCall("write_text", JSONObject().put("path", "test.txt").put("text", "x"))
+                else Replies.openAiText("Выберите папку, чтобы создать файл.")
             }
+            val watcher = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+            watcher.launch { agent.controller.state.collect { state -> if (state.permission != null) {
+                assertEquals("workspace", state.permission.id); card = true; agent.controller.skipAccess()
+            } } }
             try {
                 val messages = agent.run("Создай test.txt")
-                assertEquals(1, agent.requests.size) // no further model calls, no file-manager detour
+                assertTrue(card); assertEquals(2, agent.requests.size)
                 assertTrue((agent.screen as FakeScreen).executed.isEmpty())
-                assertTrue(messages.last().text.contains("Выбрать папку"))
-                val system = agent.requests[0].body!!.getJSONArray("messages").getJSONObject(0).getString("content")
-                assertTrue(system.contains(if (missing.isEmpty()) "НЕ выбрана" else "потерян"))
-            } finally { agent.close() }
+                assertTrue(messages.last().text.contains("папку"))
+            } finally { watcher.cancel(); agent.close() }
         }
     }
 }

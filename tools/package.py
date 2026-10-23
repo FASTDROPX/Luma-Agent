@@ -15,6 +15,8 @@ else:
     sdk = Path(properties['sdk.dir'])
 kit = sdk/'build-tools/35.0.0'
 store = a.keystore or Path.home()/'.cache/luma-signing/development.p12'
+if a.keystore and not store.is_file():
+    raise SystemExit('The supplied signing keystore does not exist; refusing to generate a replacement key.')
 store.parent.mkdir(parents=True,exist_ok=True)
 env = os.environ.copy()
 if not os.environ.get('LUMA_SIGN_PASS'):
@@ -37,10 +39,10 @@ dist=ROOT/'dist';dist.mkdir(exist_ok=True)
 metadata=json.loads((unsigned.parent/'output-metadata.json').read_text())['elements'][0]
 version=metadata['versionName']
 apk=dist/f'Luma-Agent-{version}.apk'
-run(kit/'zipalign','-P','16','-f','4',unsigned,aligned)
+run(kit/('zipalign.exe' if os.name == 'nt' else 'zipalign'),'-P','16','-f','4',unsigned,aligned)
 run(java,'-jar',kit/'lib/apksigner.jar','sign','--ks',store,'--ks-key-alias',a.alias,'--ks-pass','env:LUMA_SIGN_PASS','--key-pass','env:LUMA_SIGN_PASS','--min-sdk-version','26','--v1-signing-enabled','false','--v2-signing-enabled','true','--v3-signing-enabled','true','--v4-signing-enabled','false','--out',apk,aligned)
 run(java,'-jar',kit/'lib/apksigner.jar','verify','--verbose','--print-certs',apk)
-run(kit/'zipalign','-c','-P','16','4',apk)
+run(kit/('zipalign.exe' if os.name == 'nt' else 'zipalign'),'-c','-P','16','4',apk)
 with zipfile.ZipFile(apk) as z:
     if z.testzip():raise SystemExit('Corrupt APK')
 sha=hashlib.sha256(apk.read_bytes()).hexdigest()

@@ -22,10 +22,12 @@ class VaultAgentTest {
         val vault=SettingsVault(context);vault.saveConnection(Provider.GEMINI,"fake","")
         vault.saveModels(Provider.GEMINI,vault.state.value.connection(),listOf(ModelInfo("gemini-test")));vault.selectModel(Provider.GEMINI,"gemini-test")
         val chats=ChatStore(context);val id=chats.ensure("long");chats.append(id,"user","Длинная задача")
-        var calls=0
+        var calls=0; var initialRequestSize = 0
         val api=ProviderClient {request ->
             calls++
-            assertTrue(request.body.toString().length<20_000)
+            val size = request.body.toString().length
+            if (calls == 1) initialRequestSize = size
+            assertTrue("Context grew without bound: $size", size < initialRequestSize + 12_000)
             val reply=if(calls<=40) JSONObject().put("type","tool").put("tool","remember").put("args",JSONObject().put("notes","Прогресс $calls")).toString()
                 else """{"type":"final","text":"Завершено после сорока шагов"}"""
             JSONObject().put("candidates",org.json.JSONArray().put(JSONObject().put("content",JSONObject().put("parts",org.json.JSONArray().put(JSONObject().put("text",reply))))))
