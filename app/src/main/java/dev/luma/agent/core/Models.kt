@@ -89,7 +89,8 @@ data class AppSettings(
     val webSearch: Boolean = false,
     val search: WebSearchSettings = WebSearchSettings(),
     /** «Глубокие размышления»: the agent analyses a failed step and tries another way instead of repeating it. */
-    val deepThinking: Boolean = false
+    val deepThinking: Boolean = false,
+    val voice: VoiceSettings = VoiceSettings()
 ) {
     val formal: Boolean get() = tone == "formal"
     fun connection(p: Provider = provider) = connections[p] ?: Connection()
@@ -106,7 +107,7 @@ data class AppSettings(
             .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
             .put("maxSteps",maxSteps.coerceIn(5,30)).put("taskMinutes",taskMinutes.coerceIn(2,15)).put("unlimitedAgent", unlimitedAgent)
             .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH)).put("tokenMeter", tokenMeter)
-            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch).put("search", search.json()).put("deepThinking", deepThinking)
+            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch).put("search", search.json()).put("deepThinking", deepThinking).put("voice",voice.json())
     }
     companion object {
         fun parse(json: JSONObject): AppSettings {
@@ -125,7 +126,7 @@ data class AppSettings(
                 json.optString("blockedWords").take(BlockedWords.MAX_LENGTH), json.optBoolean("tokenMeter", true),
                 json.optDouble("chatTextScale", 1.0).toFloat().let { if (it.isFinite()) it.coerceIn(.85f, 1.4f) else 1f }, json.optBoolean("haptics", true),
                 json.optInt("agentTokenLimit", 0).coerceIn(0, 5000), json.optString("tone", "friendly").takeIf { it in listOf("friendly", "formal") } ?: "friendly",
-                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"), WebSearchSettings.parse(json.optJSONObject("search")), json.optBoolean("deepThinking"))
+                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"), WebSearchSettings.parse(json.optJSONObject("search")), json.optBoolean("deepThinking"), VoiceSettings.parse(json.optJSONObject("voice")))
         }
     }
 }

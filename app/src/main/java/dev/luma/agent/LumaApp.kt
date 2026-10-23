@@ -28,6 +28,7 @@ class AppGraph(val context: Context) {
     val hub = HuggingFaceClient()
     val downloads = HubDownloads(context)
     val agent = AgentController(context, scope, vault, chats, api)
+    val voice = VoiceController(this)
     private val mutableCatalog = MutableStateFlow(CatalogState())
     val catalog = mutableCatalog.asStateFlow()
     val chatBusy = MutableStateFlow(false)
@@ -93,7 +94,7 @@ class AppGraph(val context: Context) {
             } catch (e: CancellationException) { throw e } catch (e: Exception) { ConnectionCheck(error = safeError(e)) }
         }
     }
-    fun send(text: String, asAgent: Boolean,files: List<Attachment> = emptyList()): Boolean {
+    fun send(text: String, asAgent: Boolean,files: List<Attachment> = emptyList(),targetChat: Long? = null): Boolean {
         val clean = text.trim().ifBlank {if(files.isNotEmpty()) "Проанализируй вложенные файлы" else ""}
         if (clean.isBlank() || chatBusy.value || agent.state.value.active) return false
         if (clean.length > 12_000) { uiMessage.value = "Сообщение слишком длинное. Сократите его до 12 000 символов."; return false }
@@ -106,7 +107,7 @@ class AppGraph(val context: Context) {
         chatJob = scope.launch {
             var chatId: Long? = null
             try {
-                val id = chats.ensure(clean); chatId = id; chats.append(id, "user", clean,files)
+                val id = targetChat ?: chats.ensure(clean); chatId = id; chats.append(id, "user", clean,files)
                 if (asAgent) {
                     val token = java.util.UUID.randomUUID().toString()
                     pendingAgentRequest = token
@@ -119,6 +120,24 @@ class AppGraph(val context: Context) {
             finally { if (revision == chatRevision) { pendingAgentRequest = null; chatBusy.value = false; chatStartedAt.value = 0L } }
         }
         return true
+    }
+    /** Voice owns its request and chat even when the visible screen changes. */
+    suspend fun voiceTurn(text: String,asAgent: Boolean,chat: Long?): Pair<Long,String> {
+        if(chatBusy.value || agent.state.value.active) throw UserError("Дождитесь завершения текущего ответа.")
+        val id=chat ?: chats.ensure(text)
+        val after=chats.lastAssistant(id)?.id ?: 0L
+        if(!send(text,asAgent,targetChat=id)) throw UserError(uiMessage.value ?: "Не удалось отправить голосовой запрос.")
+        val revision=chatRevision
+        try {
+            chatJob?.join()
+            if(asAgent) agent.awaitCompletion()
+            val reply=chats.lastAssistant(id)?.takeIf {it.id>after} ?: throw UserError("Ответ не получен. Проверьте чат.")
+            if(reply.failed) throw UserError(reply.text)
+            return id to reply.text.ifBlank {"Ответ с вложением готов в чате."}
+        } catch(e: CancellationException) {
+            if(chatRevision==revision) {cancelChat();if(asAgent) agent.stop()}
+            throw e
+        }
     }
     /** Asks the model for the next answer of [chat] from its history and stores text, reasoning and pictures. */
     private suspend fun answer(chat: Long) {
@@ -173,6 +192,7 @@ class AppGraph(val context: Context) {
     }
     fun deleteMessage(id: Long) { scope.launch { runCatching { chats.deleteMessage(id) }.onFailure { uiMessage.value = safeError(it) } } }
     suspend fun clearHistory() {
+        voice.stop()
         val pendingChat=chatJob
         cancelChat();agent.stopAndJoin();pendingChat?.join()
         // Cancellation can append a final status; wait for it before deleting the referenced chat rows.

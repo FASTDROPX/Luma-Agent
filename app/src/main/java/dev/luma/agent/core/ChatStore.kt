@@ -102,6 +102,11 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
             if (c.moveToFirst()) ChatMessage(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3), Attachment.decode(c.getString(4))) else null
         }
     }
+    suspend fun lastAssistant(chat: Long): ChatMessage? = withContext(Dispatchers.IO) {
+        readableDatabase.rawQuery("SELECT id,body,created,meta FROM messages WHERE chat=? AND role='assistant' ORDER BY id DESC LIMIT 1",arrayOf(chat.toString())).use {c ->
+            if(c.moveToFirst()) ChatMessage(c.getLong(0),"assistant",c.getString(1),c.getLong(2),failed=isFailed(c.getString(3))) else null
+        }
+    }
     /** Removes one message; its files go too unless another message still uses them. */
     suspend fun deleteMessage(id: Long) = withContext(Dispatchers.IO) {
         val files=mutableListOf<Attachment>()

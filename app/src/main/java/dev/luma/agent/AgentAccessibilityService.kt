@@ -267,6 +267,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
             }
             "long_press" -> {
                 pointAtNode(args)
+                visuals?.hold()
                 val target = node(args)
                 if (!longClick(target)) {
                     // No long-click action: hold a finger on the element's centre instead.
@@ -288,6 +289,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                 val node = node(args); val direction = args.requiredString("direction")
                 val action = when (direction) { "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD; "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD; else -> throw UserError("Неверное направление прокрутки.") }
                 if (!node.isScrollable || !node.performAction(action)) throw UserError("Элемент не прокручивается в эту сторону.")
+                visuals?.scroll(direction=="down")
             }
             "tap_point", "swipe" -> {
                 validateSnapshot(args)
@@ -392,7 +394,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                     override fun onCompleted(gestureDescription: GestureDescription?) { if (continuation.isActive) continuation.resume(Unit) }
                     override fun onCancelled(gestureDescription: GestureDescription?) { if (continuation.isActive) continuation.resumeWithException(ToolFailure(ToolStatus.UNKNOWN, "Android прервал жест; он мог выполниться частично. Проверьте экран.")) }
                 }, null)
-                if (accepted) { visuals?.pulse(); if (moves) visuals?.traceTo(x2, y2) }
+                if (accepted) { visuals?.pulse(); if (moves) visuals?.traceTo(x2, y2,duration) else if(duration>=500) visuals?.hold(duration) }
                 if (!accepted && continuation.isActive) continuation.resumeWithException(ToolFailure(ToolStatus.ERROR, "Android не принял жест."))
             } }
         } catch (e: TimeoutCancellationException) {

@@ -59,7 +59,12 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false"/>
     <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
     <uses-feature android:name="android.hardware.sensor.heartrate" android:required="false"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <queries>
+        <intent><action android:name="android.intent.action.TTS_SERVICE"/></intent>
         <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent>
         <intent><action android:name="android.intent.action.SET_ALARM"/></intent>
         <intent><action android:name="android.intent.action.SET_TIMER"/></intent>
@@ -89,6 +94,7 @@
         <service android:name=".AgentTaskService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-initiated AI assistant task, visible progress and stop controls; stops after task completion"/>
         </service>
+        <service android:name=".VoiceService" android:exported="false" android:foregroundServiceType="microphone|mediaPlayback"/>
         <receiver android:name=".core.ReminderReceiver" android:exported="false"/>
         <receiver android:name=".core.ReminderBootReceiver" android:exported="true">
             <intent-filter>

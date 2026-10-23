@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "dev.luma.agent"
     compileSdk = 35
-    defaultConfig { applicationId = "dev.luma.agent"; minSdk = 26; targetSdk = 35; versionCode = 19; versionName = "0.9.1" }
+    defaultConfig { applicationId = "dev.luma.agent"; minSdk = 26; targetSdk = 35; versionCode = 20; versionName = "1.0.0" }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
@@ -28,6 +28,8 @@ android {
     packaging { resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/LICENSE*", "META-INF/NOTICE*") }
 }
 dependencies {
+    implementation("com.alphacephei:vosk-android:0.3.75@aar")
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
     val composeBom = platform("androidx.compose:compose-bom:2025.05.01")
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.10.1")

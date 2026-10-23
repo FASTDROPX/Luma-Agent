@@ -204,6 +204,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
     }
     fun stop(message: String = "Задача остановлена. Уже выполненные действия не отменяются.") { stoppedMessage = message; job?.cancel() }
     suspend fun stopAndJoin() {stop();job?.join()}
+    suspend fun awaitCompletion() {job?.join()}
     fun togglePause() { if (mutable.value.active) mutable.value = mutable.value.copy(paused = !mutable.value.paused) }
     fun decide(accepted: Boolean) { approval?.complete(accepted) }
     fun retryRequest() {retry?.complete(Unit)}

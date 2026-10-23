@@ -49,6 +49,7 @@ import kotlin.math.roundToInt
 
 @Composable fun ChatScreen(graph: AppGraph,openConnections: ()->Unit,openAccess: ()->Unit) {
     val settings by graph.vault.state.collectAsStateWithLifecycle()
+    val speech by graph.voice.state.collectAsStateWithLifecycle()
     val messages by graph.chats.messages.collectAsStateWithLifecycle()
     val selected by graph.chats.selected.collectAsStateWithLifecycle()
     val busy by graph.chatBusy.collectAsStateWithLifecycle()
@@ -62,6 +63,21 @@ import kotlin.math.roundToInt
     var input by remember(selected) {mutableStateOf(TextFieldValue(draft.text,TextRange(draft.text.length)))}
     var files by remember(selected) {mutableStateOf(draft.files.filter {graph.chats.attachments.file(it).exists()})}
     LaunchedEffect(selected) {snapshotFlow {input.text to files}.collect {(text,attached)->graph.drafts.save(selected,text,attached)}}
+    LaunchedEffect(selected) {
+        graph.voice.dictation.collect {result ->
+            if(result!=null) {
+                graph.voice.dictation.value=null
+                if(result.chat==selected) {
+                    val merged=listOf(input.text,result.text).filter {it.isNotBlank()}.joinToString(" ").take(12000)
+                    input=TextFieldValue(merged,TextRange(merged.length))
+                } else {
+                    val old=graph.drafts.get(result.chat)
+                    graph.drafts.save(result.chat,listOf(old.text,result.text).filter {it.isNotBlank()}.joinToString(" ").take(12000),old.files)
+                    graph.uiMessage.value="Диктовка сохранена в черновик исходного чата."
+                }
+            }
+        }
+    }
     var importing by remember {mutableStateOf(false)}
     // Stored with the chat, not in this screen: switching tabs or restarting keeps it.
     val asAgent by graph.chats.agentMode.collectAsStateWithLifecycle()
@@ -230,7 +246,7 @@ import kotlin.math.roundToInt
                                 repeat=if(message.role=="user" && idle) {{if(graph.send(message.text,false,message.attachments)) {follow=true;rootView.haptic(Haptic.Send,settings.haptics)}}} else null,
                                 regenerate=if(message.role=="assistant" && !message.failed && message.id==latestAnswer && idle) {{graph.regenerate(chat,message.id)}} else null)
                             val retry=if(message.failed && message.id==messages.lastOrNull()?.id && idle && chat!=null) {{graph.regenerate(chat,message.id)}} else null
-                            MessageBubble(message,animate,graph.chats.attachments,actions,retry,onCursor={y->if(message.id==latestAnswer && !pending && !relevantRun) answer=Offset(left,y-origin.y)},onGrowth={scrollEvents.trySend(Unit)})
+                            MessageBubble(message,animate,graph.chats.attachments,actions,retry,onCursor={y->if(message.id==latestAnswer && !pending && !relevantRun) answer=Offset(left,y-origin.y)},onGrowth={scrollEvents.trySend(Unit)},speak={graph.voice.read(message.id,message.text)},speaking=speech.speakingId==message.id)
                         }
                     }
                     if(pending) item(key="thinking") {
@@ -274,6 +290,7 @@ import kotlin.math.roundToInt
                 Text(sentPreview,Modifier.padding(horizontal=16.dp,vertical=10.dp),maxLines=2,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.bodyMedium)
             }
         }
+        VoicePanel(graph)
         Surface(Modifier.padding(horizontal=12.dp,vertical=4.dp).fillMaxWidth(),shape=RoundedCornerShape(26.dp),
             color=MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=.76f),shadowElevation=6.dp,
             border=BorderStroke(.8.dp,MaterialTheme.colorScheme.outlineVariant.copy(alpha=.35f))) {
@@ -301,6 +318,7 @@ import kotlin.math.roundToInt
                         cursorBrush=SolidColor(MaterialTheme.colorScheme.primary),decorationBox={field ->
                             Box {if(input.text.isEmpty()) Text(if(asAgent) "Какую задачу выполнить?" else t("Напиши сообщение…"),style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f),maxLines=1,overflow=TextOverflow.Ellipsis);field()}
                         })
+                    VoiceStart(graph,"dictation","Диктовать сообщение",Icons.Outlined.Mic,compact=true)
                     GradientActionButton(busy || run.active,!importing && (input.text.isNotBlank() || files.isNotEmpty()),sendTick,::submit,diameter=44.dp)
                 }
                 AgentAccessMode(settings.confirmActions,enabled=!busy && !run.active) {ask->graph.update {it.copy(confirmActions=ask)}}
@@ -310,6 +328,8 @@ import kotlin.math.roundToInt
     if(optionsOpen) ModalBottomSheet(onDismissRequest={optionsOpen=false}) {
         Column(Modifier.fillMaxWidth().padding(horizontal=24.dp).padding(bottom=28.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Параметры чата",style=MaterialTheme.typography.headlineSmall)
+            VoiceStart(graph,"conversation","Голосовой разговор",Icons.Outlined.Headphones)
+            VoiceStart(graph,"wake","Вызов «Люма» в фоне",Icons.Outlined.Hearing)
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Icon(Icons.Outlined.TravelExplore,null);Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {Text("Поиск в интернете");Text("Находить источники и читать страницы",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
@@ -367,7 +387,7 @@ import kotlin.math.roundToInt
     }
 }
 @OptIn(ExperimentalFoundationApi::class)
-@Composable private fun MessageBubble(message: ChatMessage,animate: Boolean,files: AttachmentStore,actions: MessageActions?,retry: (()->Unit)?,onCursor: (Float)->Unit,onGrowth: ()->Unit) {
+@Composable private fun MessageBubble(message: ChatMessage,animate: Boolean,files: AttachmentStore,actions: MessageActions?,retry: (()->Unit)?,onCursor: (Float)->Unit,onGrowth: ()->Unit,speak: ()->Unit,speaking: Boolean) {
     var menu by remember(message.id) {mutableStateOf(false)}
     var selecting by remember(message.id) {mutableStateOf(false)}
     val view=LocalView.current;val haptics=LocalHaptics.current
@@ -407,7 +427,7 @@ import kotlin.math.roundToInt
                     dev.luma.agent.core.GeneratedFile(file.name,android.net.Uri.fromFile(files.file(file)).toString(),file.size,message.timestamp,file.mime)
                 }
                 if(generated.isNotEmpty()) GeneratedFiles(generated)
-                AnswerActions(message,more=openMenu)
+                AnswerActions(message,more=openMenu,speak=speak,speaking=speaking)
             }
             actions?.let {MessageMenu(menu,{menu=false},it,user=false,select=if(message.text.isNotBlank()) {{selecting=true}} else null)}
         }
@@ -457,7 +477,7 @@ import kotlin.math.roundToInt
 }
 
 /** Copy plus a quiet footnote: generation speed and total time of this answer, when known. */
-@Composable private fun AnswerActions(message: ChatMessage,more: (()->Unit)?) {
+@Composable private fun AnswerActions(message: ChatMessage,more: (()->Unit)?,speak: ()->Unit,speaking: Boolean) {
     val clipboard=LocalClipboardManager.current
     var copied by remember(message.id) {mutableStateOf(false)}
     LaunchedEffect(copied) {if(copied) {delay(1600);copied=false}}
@@ -467,6 +487,7 @@ import kotlin.math.roundToInt
                 Icon(if(done) Icons.Outlined.Check else Icons.Outlined.ContentCopy,if(done) "Скопировано" else "Копировать ответ",Modifier.size(17.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if(message.text.isNotBlank()) IconButton(onClick=speak,Modifier.size(36.dp).testTag("speak-${message.id}")) {Icon(if(speaking) Icons.Outlined.StopCircle else Icons.Outlined.VolumeUp,if(speaking) "Остановить озвучку" else "Озвучить ответ",Modifier.size(18.dp))}
         if(more!=null) IconButton(onClick=more,Modifier.size(36.dp).testTag("more-${message.id}")) {Icon(Icons.Outlined.MoreHoriz,"Ещё",Modifier.size(18.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)}
         message.stats?.let {stats ->
             val parts=listOfNotNull(stats.outputPerSecond?.let {"↓ ${dev.luma.agent.core.formatRate(it)} т/с"},stats.totalMs.takeIf {it>0}?.let {"%.1f с".format(java.util.Locale.ROOT,it/1000.0).replace('.',',')})

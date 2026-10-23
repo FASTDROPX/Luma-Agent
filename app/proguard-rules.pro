@@ -1,6 +1,11 @@
 # Android entry points and Compose/OkHttp rules are supplied by AGP and the libraries.
 # Models use explicit JSONObject fields; there is no reflective serialization.
 -keepattributes Signature,InnerClasses,EnclosingMethod
+# JNA maps these interfaces and Structure fields to native Vosk symbols.
+-keep class org.vosk.** { *; }
+-keep class com.sun.jna.** { *; }
+# JNA's desktop-only window helpers reference AWT; Android never calls them.
+-dontwarn java.awt.**
 
 # JLaTeXMath resolves predefined formulas/font helpers by name from bundled XML.
 -keep class org.scilab.forge.jlatexmath.** { *; }
