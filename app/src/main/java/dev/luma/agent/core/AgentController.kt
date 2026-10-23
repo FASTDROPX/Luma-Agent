@@ -41,6 +41,8 @@ class AgentController(private val context: Context, private val scope: Coroutine
                     val history = chats.history(chat, 8).dropWhile { it.role != "user" }
                     val memory = AgentContext(history, goal)
                     val loopGuard = AgentLoopGuard()
+                    // Hash of the latest screenshot: steps in apps without an element tree (games) are told apart by it.
+                    var lastFrame: Long? = null
                     // Gathered once: the prompt stays identical between steps, so providers can cache it.
                     val environment = withContext(Dispatchers.IO) { TaskEnvironment.capture(context, screen() != null, settings.folder) }
                     val modelKey = "${settings.provider}/${connection.model}"
@@ -111,7 +113,8 @@ class AgentController(private val context: Context, private val scope: Coroutine
                                     chats.append(chat, "assistant", result.json.optString("message") + "\n\n" + result.json.optString("userAction") + " Затем повторите задачу. Уже выполненные шаги сохранены.")
                                     update("Нужна рабочая папка", step); return@withTimeout
                                 }
-                                if (reply.name != "remember" && loopGuard.repeated(reply, result.json)) {
+                                result.frame?.let { lastFrame = it }
+                                if (reply.name != "remember" && loopGuard.repeated(reply, result.json, lastFrame)) {
                                     mutable.value = mutable.value.copy(paused = true, stage = "Повторяются одинаковые шаги без изменений. Агент на паузе, чтобы сохранить квоту. Можно продолжить или остановить задачу.")
                                 }
                             }
@@ -171,7 +174,12 @@ class AgentController(private val context: Context, private val scope: Coroutine
         val decision = CompletableDeferred<Boolean>(); approval = decision; mutable.value = mutable.value.copy(approval = value)
         return try { decision.await() } finally { approval = null; mutable.value = mutable.value.copy(approval = null) }
     }
-    private data class ToolResult(val json: JSONObject, val image: String? = null)
+    private data class ToolResult(val json: JSONObject, val image: String? = null, val frame: Long? = null)
+    /** Gemini models point in 0–1000 of the picture's width and height, also through OpenRouter; others in pixels. */
+    private fun grid(): Int {
+        val settings = vault.state.value
+        return if (settings.provider == Provider.GEMINI || settings.connection().model.lowercase().contains("gemini")) 1000 else 0
+    }
     private fun fingerprint(tool: AgentReply.Tool) = tool.name + JSONObject(tool.args.toString()).apply { remove("snapshot") }.toString()
     /** Every result carries a status; older tool outputs without one are done unless they report an error. */
     private fun normalize(json: JSONObject): String {
@@ -208,8 +216,8 @@ class AgentController(private val context: Context, private val scope: Coroutine
             }
             tool.name == "screen" -> {
                 val vision = args.optBoolean("image", false) && vault.state.value.screenshots && vault.state.value.connection().let { c -> c.models.firstOrNull { it.id == c.model }?.vision == true }
-                val observed = driver().observe(vision)
-                ToolResult(ScreenPayload.compact(observed.json, args.optString("query").take(200), args.optBoolean("detailed")).put("status", ToolStatus.DONE), observed.image)
+                val observed = driver().observe(vision, grid())
+                ToolResult(ScreenPayload.compact(observed.json, args.optString("query").take(200), args.optBoolean("detailed")).put("status", ToolStatus.DONE), observed.image, observed.frame)
             }
             tool.name == "wait" -> { delay(args.requiredInt("ms").coerceIn(0, 2000).toLong()); ToolResult(JSONObject().put("status", ToolStatus.DONE).put("ok", true)) }
             else -> {
@@ -222,7 +230,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
         val driver = screen() ?: return ToolResult(result)
         awaitRunning(); delay(250)
         try {
-            val observed = driver.observe(false)
+            val observed = driver.observe(false, grid())
             result.put("screen", ScreenPayload.compact(observed.json))
         } catch (e: UserError) { result.put("screenError", e.message) }
         return ToolResult(result)

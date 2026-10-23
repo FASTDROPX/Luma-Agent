@@ -76,20 +76,53 @@ internal object ScreenPayload {
     }
 }
 
+/**
+ * Pauses a task that keeps doing the same thing with no effect: the same step with the same result four times among the
+ * last twelve. In apps drawn without Android views (games), the element tree is always empty and every result looks the
+ * same, so the step also carries [frame] — a tiny hash of the latest screenshot (see [FrameHash]). Two steps count as one
+ * only if their screenshots also match closely; a game that changes on screen is never taken for a loop.
+ */
 internal class AgentLoopGuard {
-    private val recent = ArrayDeque<String>()
-    fun repeated(tool: AgentReply.Tool, result: JSONObject): Boolean {
+    private class Step(val key: Int, val frame: Long?)
+    private val recent = ArrayDeque<Step>()
+    fun repeated(tool: AgentReply.Tool, result: JSONObject, frame: Long? = null): Boolean {
         fun stable(value: Any?): String = when (value) {
             is JSONObject -> value.keys().asSequence().filter { it != "snapshot" }.sorted()
                 .joinToString(prefix = "{", postfix = "}") { "$it:${stable(value.opt(it))}" }
             is JSONArray -> (0 until value.length()).joinToString(prefix = "[", postfix = "]") { stable(value.opt(it)) }
             else -> value.toString()
         }
-        val fingerprint = (tool.name + stable(tool.args) + stable(result)).hashCode().toString()
-        recent.addLast(fingerprint)
+        val key = (tool.name + stable(tool.args) + stable(result)).hashCode()
+        recent.addLast(Step(key, frame))
         while (recent.size > 12) recent.removeFirst()
-        if (recent.count { it == fingerprint } < 4) return false
+        if (recent.count { it.key == key && FrameHash.similar(it.frame, frame) } < 4) return false
         recent.clear()
         return true
     }
+}
+
+/**
+ * A 64-bit difference hash of a screenshot: 9×8 grey cells, one bit per neighbouring pair. Small animations flip a few
+ * bits; another menu or screen flips many. Used only on the phone, never sent to the model.
+ */
+object FrameHash {
+    /** Brightness of a 9×8 grid, row by row (72 values, 0..255). */
+    fun of(grey: IntArray): Long {
+        require(grey.size == 72)
+        var hash = 0L
+        for (row in 0 until 8) for (column in 0 until 8) {
+            hash = hash shl 1
+            if (grey[row * 9 + column] > grey[row * 9 + column + 1]) hash = hash or 1L
+        }
+        return hash
+    }
+    fun of(bitmap: android.graphics.Bitmap): Long {
+        val small = android.graphics.Bitmap.createScaledBitmap(bitmap, 9, 8, true)
+        try {
+            val pixels = IntArray(72); small.getPixels(pixels, 0, 9, 0, 0, 9, 8)
+            return of(IntArray(72) { val c = pixels[it]; (299 * ((c shr 16) and 255) + 587 * ((c shr 8) and 255) + 114 * (c and 255)) / 1000 })
+        } finally { if (small !== bitmap) small.recycle() }
+    }
+    /** Unknown frames compare as similar, so steps without screenshots are judged by their results alone. */
+    fun similar(a: Long?, b: Long?) = a == null || b == null || java.lang.Long.bitCount(a xor b) <= 6
 }

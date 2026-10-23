@@ -30,7 +30,7 @@ data class TokenStats(val inputTokens: Int, val outputTokens: Int, val firstToke
 }
 
 data class Generation(val text: String, val reasoning: String = "", val stats: TokenStats? = null, val images: List<GeneratedImage> = emptyList(),
-    val toolCalls: List<ToolCall> = emptyList())
+    val toolCalls: List<ToolCall> = emptyList(), val search: WebSearch? = null)
 
 /** A picture the model drew; bytes are kept as received and normalised only when saved to the chat. */
 class GeneratedImage(val mime: String, val bytes: ByteArray) {
@@ -77,6 +77,10 @@ internal class StreamAssembler(private val format: WireFormat, private val start
     private class PartialCall(var id: String = "", var name: String = "", val arguments: StringBuilder = StringBuilder())
     private val calls = sortedMapOf<Int, PartialCall>()
     private val geminiCalls = mutableListOf<JSONObject>()
+    /** Web search of the reply, when the model searched: queries, pages found, pages read. */
+    private val search = WebSearch.Builder()
+    /** Claude's web_search calls by block index; their query arrives as input_json_delta. */
+    private val searchInputs = mutableMapOf<Int, StringBuilder>()
 
     fun accept(data: String) {
         val payload = data.trim()
@@ -91,6 +95,7 @@ internal class StreamAssembler(private val format: WireFormat, private val start
                 choice?.optJSONObject("delta")?.let { delta ->
                     thought(delta.optString("reasoning_content").ifEmpty { delta.optString("reasoning") })
                     answer(delta.optString("content"))
+                    search.annotations(delta.optJSONArray("annotations"))
                     delta.optJSONArray("tool_calls")?.let { list -> for (i in 0 until list.length()) {
                         val piece = list.optJSONObject(i) ?: continue; mark()
                         val call = calls.getOrPut(piece.optInt("index", i)) { PartialCall() }
@@ -99,6 +104,7 @@ internal class StreamAssembler(private val format: WireFormat, private val start
                             f.opt("arguments").let { a -> if (a is String) call.arguments.append(a) else if (a is JSONObject) call.arguments.append(a.toString()) } }
                     } }
                 }
+                search.annotations(choice?.optJSONObject("message")?.optJSONArray("annotations"))
                 choice?.optString("finish_reason")?.takeIf { it.isNotEmpty() && it != "null" }?.let { finish = it }
                 j.optJSONObject("usage")?.let { usage = it }
             }
@@ -111,6 +117,7 @@ internal class StreamAssembler(private val format: WireFormat, private val start
                     if (part.has("functionCall")) { mark(); geminiCalls += JSONObject(part.toString()); continue }
                     if (part.optBoolean("thought")) thought(part.optString("text")) else answer(part.optString("text"))
                 }
+                search.gemini(candidate?.optJSONObject("groundingMetadata"))
                 candidate?.optString("finishReason")?.takeIf { it.isNotEmpty() }?.let { finish = it }
                 j.optJSONObject("usageMetadata")?.let { usage = it }
             }
@@ -120,12 +127,21 @@ internal class StreamAssembler(private val format: WireFormat, private val start
                     when (block.optString("type")) {
                         "thinking" -> thought(block.optString("thinking"))
                         "tool_use" -> { mark(); calls[j.optInt("index")] = PartialCall(block.optString("id"), block.optString("name")) }
-                        else -> answer(block.optString("text"))
+                        "server_tool_use" -> { mark(); if (block.optString("name") == "web_search") searchInputs[j.optInt("index")] = StringBuilder() }
+                        "web_search_tool_result" -> { mark(); search.claudeResults(block) }
+                        else -> {
+                            answer(block.optString("text"))
+                            block.optJSONArray("citations")?.let { for (i in 0 until it.length()) search.claudeCitation(it.optJSONObject(i)) }
+                        }
                     }
                 }
                 "content_block_delta" -> j.optJSONObject("delta")?.let { delta ->
                     when (delta.optString("type")) { "thinking_delta" -> thought(delta.optString("thinking")); "text_delta" -> answer(delta.optString("text"))
-                        "input_json_delta" -> calls[j.optInt("index")]?.arguments?.append(delta.optString("partial_json")) }
+                        "input_json_delta" -> (calls[j.optInt("index")]?.arguments ?: searchInputs[j.optInt("index")])?.append(delta.optString("partial_json"))
+                        "citations_delta" -> search.claudeCitation(delta.optJSONObject("citation")) }
+                }
+                "content_block_stop" -> searchInputs.remove(j.optInt("index"))?.let { input ->
+                    search.query(runCatching { JSONObject(input.toString().ifBlank { "{}" }).optString("query") }.getOrNull())
                 }
                 "message_delta" -> {
                     j.optJSONObject("delta")?.optString("stop_reason")?.takeIf { it.isNotEmpty() && it != "null" }?.let { finish = it }
@@ -169,6 +185,7 @@ internal class StreamAssembler(private val format: WireFormat, private val start
                 if (claudeInput >= 0 || claudeOutput >= 0) put("usage", JSONObject().put("input_tokens", claudeInput.coerceAtLeast(0)).put("output_tokens", claudeOutput.coerceAtLeast(0)))
             }
         }
+        search.build()?.let { root.put("_search", it.json()) }
         return root.put("_luma", timing)
     }
 }

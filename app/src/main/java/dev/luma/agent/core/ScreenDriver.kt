@@ -2,11 +2,16 @@ package dev.luma.agent.core
 
 import org.json.JSONObject
 
-data class ScreenResult(val json: JSONObject, val image: String? = null)
+/** [frame] is a [FrameHash] of the screenshot, when one was taken; it stays on the phone. */
+data class ScreenResult(val json: JSONObject, val image: String? = null, val frame: Long? = null)
 
 /** Screen reading and Accessibility actions; the Luma Accessibility service is the real one. */
 interface ScreenDriver {
-    suspend fun observe(withImage: Boolean): ScreenResult
+    /**
+     * [grid] > 0 puts all coordinates (node bounds, width and height, and later tap_point and swipe) on a grid of that
+     * size instead of screenshot pixels: Gemini models point in 0–1000 of the picture's width and height.
+     */
+    suspend fun observe(withImage: Boolean, grid: Int = 0): ScreenResult
     suspend fun execute(name: String, args: JSONObject): JSONObject
     /** Why a step must wait for the user (a blocked word, a permission screen), or null. */
     fun sensitive(name: String, args: JSONObject, blockedWords: String): String?

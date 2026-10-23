@@ -24,7 +24,9 @@ import kotlin.coroutines.resumeWithException
 
 /** [local]: a model on the user's own hardware may think for minutes before the first byte. */
 internal data class WireRequest(val url: String, val headers: Map<String, String>, val body: JSONObject? = null, val catalog: Boolean = false, val local: Boolean = false,
-    val stream: Boolean = false, val format: WireFormat = WireFormat.OPENAI)
+    val stream: Boolean = false, val format: WireFormat = WireFormat.OPENAI,
+    /** Waits longer: the provider searches the web before answering. */
+    val slow: Boolean = false)
 internal class ProviderFailure(val code: Int,val waitMillis: Long=0,message: String): UserError(message) {
     val retryable get()=code in setOf(408,429,500,502,503,504) || code==0
 }
@@ -42,6 +44,8 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
         .addInterceptor(localCleartextOnly).build()
     private val catalogClient = client.newBuilder().connectTimeout(6, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).callTimeout(20, TimeUnit.SECONDS).build()
     private val localClient = client.newBuilder().readTimeout(300, TimeUnit.SECONDS).callTimeout(330, TimeUnit.SECONDS).build()
+    /** Replies with web search: the provider searches and reads pages before it answers. */
+    private val slowClient = client.newBuilder().readTimeout(150, TimeUnit.SECONDS).callTimeout(240, TimeUnit.SECONDS).build()
     suspend fun models(provider: Provider, connection: Connection): List<ModelInfo> = try {
         withTimeout(20_000) {
             val base = base(provider, connection); val headers = headers(provider, connection)
@@ -112,9 +116,12 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
     suspend fun generate(provider: Provider, connection: Connection, turns: List<Turn>, system: String, agent: Boolean = false,
         onRetry: (Int,Long)->Unit={_,_->}): String = generateDetailed(provider, connection, turns, system, agent, onRetry).text
 
-    /** [tools] switches on native function calling (agent only); null keeps the plain text protocol. */
+    /**
+     * [tools] switches on native function calling (agent only); null keeps the plain text protocol.
+     * [webSearch] lets the model search the web itself in a chat reply, where the provider's API offers it (see [WebSearch.supported]).
+     */
     suspend fun generateDetailed(provider: Provider, connection: Connection, turns: List<Turn>, system: String, agent: Boolean = false,
-        onRetry: (Int,Long)->Unit={_,_->}, tools: List<ToolSpec>? = null): Generation {
+        onRetry: (Int,Long)->Unit={_,_->}, tools: List<ToolSpec>? = null, webSearch: Boolean = false): Generation {
         if (connection.model.isBlank()) throw UserError("Выберите модель в разделе «Подключения».")
         val latestUser=turns.indexOfLast {it.role=="user"}
         val painterModel = connection.models.firstOrNull { it.id == connection.model }?.imageOutput == true
@@ -132,6 +139,7 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
             })
         }
         if (painter && provider == Provider.OPENAI) return paintWithOpenAi(connection, prepared, onRetry)
+        val searching = webSearch && !agent && !painter && WebSearch.supported(provider)
         val base = base(provider, connection); val headers = headers(provider, connection)
         val parameters = connection.generation()
         val known = connection.models.firstOrNull { it.id == connection.model }?.outputLimit?.takeIf { it > 0 }
@@ -151,6 +159,8 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
             if(sampling && parameters.topP >= 0 && (provider != Provider.CLAUDE || parameters.temperature < 0)) body.put(if(gemini) "topP" else "top_p",parameters.topP.toDouble())
             return body
         }
+        // OpenAI's web search lives in the Responses API, not in Chat Completions.
+        if (searching && provider == Provider.OPENAI) return searchWithOpenAi(connection, prepared, system, outputLimit, ::configure, onRetry)
         val root = when (provider) {
             Provider.GEMINI -> {
                 if (!connection.model.matches(Regex("[A-Za-z0-9_.:-]+"))) throw UserError("Некорректный ID модели Gemini.")
@@ -184,11 +194,13 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                 if (painter) config.put("responseModalities", JSONArray().put("TEXT").put("IMAGE"))
                 val body = JSONObject().put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                     .put("contents", contents).put("generationConfig", config)
+                // Grounding with Google Search: Gemini decides itself when to search.
+                if (searching) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
                 if (native) body.put("tools", JSONArray().put(JSONObject().put("functionDeclarations", JSONArray(tools!!.map { t ->
                     JSONObject().put("name", t.name).put("description", t.summary).apply { if (t.args.isNotEmpty()) put("parameters", t.schema(gemini = true)) } }))))
                     .put("toolConfig", JSONObject().put("functionCallingConfig", JSONObject().put("mode", "AUTO")))
                 request(WireRequest(base + "models/${connection.model}:" + (if (painter) "generateContent" else "streamGenerateContent?alt=sse"), headers,
-                    body, stream = !painter, format = WireFormat.GEMINI))
+                    body, stream = !painter, format = WireFormat.GEMINI, slow = searching))
             }
             Provider.CLAUDE -> {
                 val messages = JSONArray()
@@ -214,7 +226,9 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                 val body = configure(JSONObject().put("model", connection.model).put("system", system).put("max_tokens", outputLimit ?: CLAUDE_FALLBACK_TOKENS)
                     .put("messages", messages).put("stream", true))
                 if (native) body.put("tools", JSONArray(tools!!.map { t -> JSONObject().put("name", t.name).put("description", t.summary).put("input_schema", t.schema()) }))
-                request(WireRequest(base + "messages", headers, body, stream = true, format = WireFormat.CLAUDE))
+                // Claude's own web search tool, run on Anthropic's side; up to five searches per answer.
+                if (searching) body.put("tools", JSONArray().put(JSONObject().put("type", "web_search_20250305").put("name", "web_search").put("max_uses", 5)))
+                request(WireRequest(base + "messages", headers, body, stream = true, format = WireFormat.CLAUDE, slow = searching))
             }
             else -> {
                 val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
@@ -250,9 +264,11 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
                         JSONObject().put("name", t.name).put("description", t.summary).put("parameters", t.schema())) })).put("tool_choice", "auto")
                     if (provider == Provider.OPENAI) body.put("parallel_tool_calls", false)
                 } else if (agent && provider == Provider.DEEPSEEK) body.put("response_format", JSONObject().put("type", "json_object"))
+                // OpenRouter's web plugin: search results come back as url_citation annotations.
+                if (searching && provider == Provider.OPENROUTER) body.put("plugins", JSONArray().put(JSONObject().put("id", "web").put("max_results", 5)))
                 if (painter) body.put("modalities", JSONArray().put("image").put("text"))
                 else body.put("stream", true).put("stream_options", JSONObject().put("include_usage", true))
-                request(WireRequest(base + "chat/completions", headers, body, local = provider == Provider.LOCAL, stream = !painter, format = WireFormat.OPENAI))
+                request(WireRequest(base + "chat/completions", headers, body, local = provider == Provider.LOCAL, stream = !painter, format = WireFormat.OPENAI, slow = searching))
             }
         }
         var reasoning = ""
@@ -310,7 +326,52 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
         val format = when (provider) { Provider.GEMINI -> WireFormat.GEMINI; Provider.CLAUDE -> WireFormat.CLAUDE; else -> WireFormat.OPENAI }
         val stats = ReplyParts.stats(format, root, text, reasoning)
         if (stats != null) mutableStats.value = stats
-        return Generation(text, reasoning.trim(), stats, images, calls.filter { it.name.isNotBlank() })
+        val search = if (searching) WebSearch.parse(root.optJSONObject("_search")) else null
+        return Generation(text, reasoning.trim(), stats, images, calls.filter { it.name.isNotBlank() }, search)
+    }
+    /**
+     * A chat reply through OpenAI's Responses API with its web_search tool. The reply comes in one piece; its output lists
+     * the searches (with the pages found), the pages opened and the citations.
+     */
+    private suspend fun searchWithOpenAi(connection: Connection, turns: List<Turn>, system: String, outputLimit: Int?,
+        configure: (JSONObject, Boolean) -> JSONObject, onRetry: (Int,Long)->Unit): Generation {
+        val input = JSONArray()
+        for (turn in turns) {
+            if (turn.role != "user" && turn.role != "assistant") continue
+            val content = JSONArray()
+            if (turn.role == "assistant") content.put(JSONObject().put("type", "output_text").put("text", turn.text))
+            else {
+                content.put(JSONObject().put("type", "input_text").put("text", attachmentText(turn)))
+                turn.image?.let { content.put(JSONObject().put("type", "input_image").put("image_url", "data:image/jpeg;base64,$it")) }
+                turn.attachments.filter { it.text == null }.forEach { file ->
+                    if (file.mime == "application/pdf") content.put(JSONObject().put("type", "input_file").put("filename", file.name).put("file_data", "data:${file.mime};base64,${file.data}"))
+                    else content.put(JSONObject().put("type", "input_image").put("image_url", "data:${file.mime};base64,${file.data}"))
+                }
+            }
+            input.put(JSONObject().put("role", turn.role).put("content", content))
+        }
+        val body = configure(JSONObject().put("model", connection.model).put("instructions", system).put("input", input)
+            .put("tools", JSONArray().put(JSONObject().put("type", "web_search")))
+            .put("include", JSONArray().put("web_search_call.action.sources")), false)
+        outputLimit?.let { body.put("max_output_tokens", it) }
+        val root = send(WireRequest(Provider.OPENAI.base + "responses", headers(Provider.OPENAI, connection), body, slow = true), onRetry)
+        if (root.optString("status") == "incomplete" && root.optJSONObject("incomplete_details")?.optString("reason") == "max_output_tokens")
+            throw UserError("Ответ обрезан лимитом. Сократите задачу или выберите другую модель.")
+        val output = root.optJSONArray("output") ?: JSONArray()
+        val text = StringBuilder(); val reasoning = StringBuilder()
+        for (i in 0 until output.length()) {
+            val item = output.optJSONObject(i) ?: continue
+            when (item.optString("type")) {
+                "message" -> item.optJSONArray("content")?.let { c -> for (k in 0 until c.length()) c.optJSONObject(k)?.takeIf { it.optString("type") == "output_text" }?.let { text.append(it.optString("text")) } }
+                "reasoning" -> item.optJSONArray("summary")?.let { c -> for (k in 0 until c.length()) c.optJSONObject(k)?.optString("text")?.takeIf { it.isNotBlank() }?.let { reasoning.append(it).append("\n\n") } }
+            }
+        }
+        val answer = text.toString().trim()
+        if (answer.isEmpty()) throw UserError("Модель вернула пустой ответ.")
+        val usage = root.optJSONObject("usage")
+        val stats = root.optJSONObject("_luma")?.let { TokenStats(usage?.optInt("input_tokens", 0) ?: 0, usage?.optInt("output_tokens", 0) ?: 0, 0, it.optLong("totalMs"), estimated = usage == null) }
+        if (stats != null) mutableStats.value = stats
+        return Generation(answer, reasoning.toString().trim(), stats, search = WebSearch.Builder().apply { responses(output) }.build())
     }
     /** Without native tools, earlier native turns are rewritten as the JSON-command conversation. */
     private fun plainTurn(turn: Turn): Turn = when {
@@ -366,7 +427,7 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
             header("Accept", "application/json")
             wire.body?.let { post(it.toString().toRequestBody("application/json; charset=utf-8".toMediaType())) }
         }.build()
-        val call = (if (wire.catalog) catalogClient else if (wire.local) localClient else client).newCall(request)
+        val call = (if (wire.catalog) catalogClient else if (wire.local) localClient else if (wire.slow) slowClient else client).newCall(request)
         val started = System.nanoTime()
         return suspendCancellableCoroutine<JSONObject> { continuation ->
             continuation.invokeOnCancellation { call.cancel() }

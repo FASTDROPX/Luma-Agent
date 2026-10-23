@@ -23,8 +23,9 @@ class FakeScreen(private val failWith: Map<String, ToolFailure> = emptyMap()) : 
     val executed = mutableListOf<Pair<String, JSONObject>>()
     var observed = 0
     var observedWithImage = 0
-    override suspend fun observe(withImage: Boolean): ScreenResult {
-        observed++; if (withImage) observedWithImage++
+    val grids = mutableListOf<Int>()
+    override suspend fun observe(withImage: Boolean, grid: Int): ScreenResult {
+        observed++; if (withImage) observedWithImage++; grids += grid
         return ScreenResult(JSONObject().put("snapshot", "s$observed").put("package", "com.example.app").put("width", 1080).put("height", 2400).put("nodes", JSONArray()))
     }
     override suspend fun execute(name: String, args: JSONObject): JSONObject {

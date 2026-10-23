@@ -22,6 +22,8 @@ class AppGraph(val context: Context) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val vault = SettingsVault(context)
     val chats = ChatStore(context)
+    /** Unsent text and files of each chat; survive switching screens and restarts. */
+    val drafts = DraftStore(context)
     val api = ProviderClient()
     val hub = HuggingFaceClient()
     val downloads = HubDownloads(context)
@@ -112,10 +114,11 @@ class AppGraph(val context: Context) {
     /** Asks the model for the next answer of [chat] from its history and stores text, reasoning and pictures. */
     private suspend fun answer(chat: Long) {
         val settings = vault.state.value; val connection = settings.connection()
-        val reply = api.generateDetailed(settings.provider, connection, chats.history(chat, connection.generation().contextTurns).dropWhile { it.role != "user" }, ModelPrompts.chat(connection, settings.formal))
+        val reply = api.generateDetailed(settings.provider, connection, chats.history(chat, connection.generation().contextTurns).dropWhile { it.role != "user" }, ModelPrompts.chat(connection, settings.formal),
+            webSearch = settings.webSearch)
         val (text, inline) = GeneratedImage.extractInline(reply.text)
         val pictures = (reply.images + inline).take(8).mapIndexed { i, image -> chats.attachments.store("Изображение ${i + 1}.${image.extension}", image.mime, image.bytes) }
-        chats.append(chat, "assistant", text, pictures, reply.reasoning, reply.stats)
+        chats.append(chat, "assistant", text, pictures, reply.reasoning, reply.stats, search = reply.search)
         chats.addUsage(chat, reply.stats)
     }
     private suspend fun fail(chat: Long?, e: Exception) {

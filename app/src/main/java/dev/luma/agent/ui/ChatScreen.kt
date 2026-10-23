@@ -18,8 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -43,6 +41,7 @@ import dev.luma.agent.core.AttachmentStore
 import dev.luma.agent.core.safeError
 import dev.luma.agent.core.ChatMessage
 import dev.luma.agent.core.RunState
+import dev.luma.agent.core.WebSearch
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlin.math.roundToInt
@@ -57,8 +56,11 @@ import kotlin.math.roundToInt
     val chatStartedAt by graph.chatStartedAt.collectAsStateWithLifecycle()
     val tokenStats by graph.api.stats.collectAsStateWithLifecycle()
     val reduced=LocalReducedMotion.current
-    var input by rememberSaveable(selected,stateSaver=TextFieldValue.Saver) {mutableStateOf(TextFieldValue(""))}
-    var files by rememberSaveable(selected,stateSaver=Saver<List<Attachment>,String>(save={Attachment.encode(it)},restore={Attachment.decode(it)})) {mutableStateOf(emptyList())}
+    // The draft of each chat lives in the app, not in this screen: another tab, another chat or a restart keeps it.
+    val draft=remember(selected) {graph.drafts.get(selected)}
+    var input by remember(selected) {mutableStateOf(TextFieldValue(draft.text,TextRange(draft.text.length)))}
+    var files by remember(selected) {mutableStateOf(draft.files.filter {graph.chats.attachments.file(it).exists()})}
+    LaunchedEffect(selected) {snapshotFlow {input.text to files}.collect {(text,attached)->graph.drafts.save(selected,text,attached)}}
     var importing by remember {mutableStateOf(false)}
     // Stored with the chat, not in this screen: switching tabs or restarting keeps it.
     val asAgent by graph.chats.agentMode.collectAsStateWithLifecycle()
@@ -112,6 +114,7 @@ import kotlin.math.roundToInt
     LaunchedEffect(lastFailed) {if(lastFailed!=null && System.currentTimeMillis()-(messages.lastOrNull()?.timestamp ?: 0)<5000) rootView.haptic(Haptic.Error,haptics)}
     val relevantRun=run.active && run.chatId==selected
     val pending=busy && !run.active && messages.lastOrNull()?.role!="assistant"
+    val searching=settings.webSearch && WebSearch.supported(settings.provider)
     val latestAnswer=messages.lastOrNull {it.role=="assistant"}?.id
     var origin by remember {mutableStateOf(Offset.Zero)}
     var home by remember {mutableStateOf(Offset.Unspecified)}
@@ -174,7 +177,7 @@ import kotlin.math.roundToInt
                     if(pending) item(key="thinking") {
                         Row(Modifier.animateItem(fadeInSpec=null,placementSpec=null,fadeOutSpec=null).fillMaxWidth().heightIn(min=48.dp).padding(start=52.dp).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+it.size.height/2f)},verticalAlignment=Alignment.CenterVertically) {
                             val elapsed=rememberElapsed(chatStartedAt)
-                            Text("Готовлю ответ…",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(if(searching) "Ищу в интернете и готовлю ответ…" else "Готовлю ответ…",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                             if(elapsed>=1000) Text("  ${dev.luma.agent.core.formatElapsed(elapsed)}",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f))
                         }
                     }
@@ -219,6 +222,11 @@ import kotlin.math.roundToInt
                 Row(Modifier.padding(start=4.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
                     FilterChip(!asAgent,{graph.setAgentMode(false)},label={Text("Чат")},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(15.dp))})
                     FilterChip(asAgent,{graph.setAgentMode(true)},label={Text("Агент")},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(15.dp))})
+                    // Web search for chat replies; DeepSeek's API and local servers have none.
+                    if(!asAgent) FilterChip(searching,{
+                        if(WebSearch.supported(settings.provider)) graph.update {it.copy(webSearch=!it.webSearch)}
+                        else graph.uiMessage.value="У провайдера ${settings.provider.label} нет поиска в интернете через API. Он есть у Gemini, Claude, OpenAI и OpenRouter."
+                    },label={Text("Поиск")},leadingIcon={Icon(Icons.Outlined.TravelExplore,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-web-search"))
                     Spacer(Modifier.weight(1f))
                     if(asAgent) IconButton(onClick=openAccess) {Icon(Icons.Outlined.Security,"Доступ агента",Modifier.size(20.dp))}
                 }
@@ -316,6 +324,7 @@ import kotlin.math.roundToInt
         Box(Modifier.fillMaxWidth().padding(start=52.dp)) {
             Column(Modifier.fillMaxWidth().testTag("reply-${message.id}"),verticalArrangement=Arrangement.spacedBy(6.dp)) {
                 Text("Luma",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
+                message.search?.let {SearchBlock(it)}
                 if(message.reasoning.isNotBlank()) ThinkingBlock(message.reasoning,message.stats)
                 if(pictures.isNotEmpty()) GeneratedImages(pictures,files)
                 if(other.isNotEmpty()) AttachmentStrip(other,files)

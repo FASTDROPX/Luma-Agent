@@ -84,7 +84,9 @@ data class AppSettings(
     /** "friendly" addresses the user as «ты», "formal" as «вы» — in the interface and in the model's replies. */
     val tone: String = "friendly",
     /** How the agent calls tools: "auto" (native function calling, JSON commands if the server rejects it), "native" or "json". */
-    val toolCalling: String = "auto"
+    val toolCalling: String = "auto",
+    /** Chat replies may search the web, where the provider's API offers it. */
+    val webSearch: Boolean = false
 ) {
     val formal: Boolean get() = tone == "formal"
     fun connection(p: Provider = provider) = connections[p] ?: Connection()
@@ -101,7 +103,7 @@ data class AppSettings(
             .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
             .put("maxSteps",maxSteps.coerceIn(5,30)).put("taskMinutes",taskMinutes.coerceIn(2,15)).put("unlimitedAgent", unlimitedAgent)
             .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH)).put("tokenMeter", tokenMeter)
-            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling)
+            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch)
     }
     companion object {
         fun parse(json: JSONObject): AppSettings {
@@ -120,7 +122,7 @@ data class AppSettings(
                 json.optString("blockedWords").take(BlockedWords.MAX_LENGTH), json.optBoolean("tokenMeter", true),
                 json.optDouble("chatTextScale", 1.0).toFloat().let { if (it.isFinite()) it.coerceIn(.85f, 1.4f) else 1f }, json.optBoolean("haptics", true),
                 json.optInt("agentTokenLimit", 0).coerceIn(0, 5000), json.optString("tone", "friendly").takeIf { it in listOf("friendly", "formal") } ?: "friendly",
-                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto")
+                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"))
         }
     }
 }
@@ -140,7 +142,7 @@ fun safeError(error: Throwable): String = if (error is UserError) error.message 
 data class Turn(val role: String, val text: String, val image: String? = null, val attachments: List<AttachmentData> = emptyList(),
     val toolCalls: List<ToolCall> = emptyList(), val toolCallId: String? = null, val toolName: String? = null)
 data class ChatMessage(val id: Long, val role: String, val text: String, val timestamp: Long, val attachments: List<Attachment> = emptyList(),
-    val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false)
+    val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false, val search: WebSearch? = null)
 data class Conversation(val id: Long, val title: String, val updated: Long, val pinned: Boolean = false, val agent: Boolean = false)
 data class Approval(val title: String, val details: String, val background: Boolean = false)
 data class RunState(val active: Boolean = false, val paused: Boolean = false, val stage: String = "", val step: Int = 0,

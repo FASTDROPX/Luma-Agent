@@ -62,12 +62,13 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
             put("title", title.trim().take(60)); put("updated", System.currentTimeMillis()); put("agent", if (mutableAgent.value) 1 else 0)
         }).also { mutableSelected.value = it; refresh(); reloadMessages(); refreshUsage() }
     }
-    /** [reasoning] and [stats] are shown with the answer only; they are never sent back to the model.
+    /** [reasoning], [stats] and [search] are shown with the answer only; they are never sent back to the model.
      *  [failed] marks an error reply that the chat offers to send again. */
-    suspend fun append(chat: Long, role: String, body: String,files: List<Attachment> = emptyList(),reasoning: String = "",stats: TokenStats? = null,failed: Boolean = false): Long = withContext(Dispatchers.IO) {
+    suspend fun append(chat: Long, role: String, body: String,files: List<Attachment> = emptyList(),reasoning: String = "",stats: TokenStats? = null,failed: Boolean = false,
+        search: WebSearch? = null): Long = withContext(Dispatchers.IO) {
         if(files.size>8 || files.sumOf {it.size}>32_000_000) throw UserError("Не больше 8 вложений и 32 МБ в одном сообщении.")
         val now = System.currentTimeMillis()
-        val meta=(stats?.json() ?: JSONObject()).apply { if(failed) put("failed",true) }.takeIf { it.length()>0 }?.toString().orEmpty()
+        val meta=(stats?.json() ?: JSONObject()).apply { if(failed) put("failed",true); search?.let { put("search",it.json()) } }.takeIf { it.length()>0 }?.toString().orEmpty()
         val id: Long
         writableDatabase.beginTransaction()
         try {
@@ -143,7 +144,7 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
         val title=readableDatabase.rawQuery("SELECT title FROM conversations WHERE id=?",arrayOf(chat.toString())).use {c->if(c.moveToFirst()) c.getString(0) else "Чат"}
         val out=StringBuilder("# ").append(title).append("\n\n")
         val time=SimpleDateFormat("d MMMM yyyy, HH:mm",Locale("ru"))
-        readableDatabase.rawQuery("SELECT role,body,created,attachments,reasoning FROM messages WHERE chat=? ORDER BY id",arrayOf(chat.toString())).use {c->
+        readableDatabase.rawQuery("SELECT role,body,created,attachments,reasoning,meta FROM messages WHERE chat=? ORDER BY id",arrayOf(chat.toString())).use {c->
             while(c.moveToNext()) {
                 val role=c.getString(0)
                 if(role=="tool") {out.append("> ").append(c.getString(1)).append("\n\n");continue}
@@ -152,6 +153,12 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
                 val reasoning=c.getString(4)
                 if(reasoning.isNotBlank()) out.append("<details><summary>Рассуждения</summary>\n\n").append(reasoning).append("\n\n</details>\n\n")
                 out.append(c.getString(1)).append("\n\n")
+                val search=runCatching {WebSearch.parse(JSONObject(c.getString(5).orEmpty().ifBlank {"{}"}).optJSONObject("search"))}.getOrNull()
+                if(search!=null && search.sources.isNotEmpty()) {
+                    out.append("Источники:\n\n")
+                    search.sources.forEach {out.append("- [").append(it.title.replace("]","")).append("](").append(it.url).append(")\n")}
+                    out.append("\n")
+                }
             }
         }
         out.toString()
@@ -186,7 +193,8 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
         val result = mutableListOf<ChatMessage>()
         readableDatabase.rawQuery("SELECT id,role,body,created,attachments,reasoning,meta FROM messages WHERE chat=? ORDER BY id DESC LIMIT 200", arrayOf(id.toString())).use { c -> while (c.moveToNext()) {
             val meta=c.getString(6)
-            result += ChatMessage(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3),Attachment.decode(c.getString(4)),c.getString(5),TokenStats.parse(meta),isFailed(meta))
+            val search=runCatching {WebSearch.parse(JSONObject(meta.orEmpty().ifBlank {"{}"}).optJSONObject("search"))}.getOrNull()
+            result += ChatMessage(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3),Attachment.decode(c.getString(4)),c.getString(5),TokenStats.parse(meta),isFailed(meta),search)
         } }
         mutableMessages.value = result.reversed()
     }

@@ -14,6 +14,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.luma.agent.core.BlockedWords
+import dev.luma.agent.core.FrameHash
 import dev.luma.agent.core.Gestures
 import dev.luma.agent.core.ScreenDriver
 import dev.luma.agent.core.ScreenResult
@@ -50,6 +51,13 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
     private var snapshot = ""; private var snapshotPackage = ""
     private var physicalWidth = 1; private var physicalHeight = 1
     private var imageWidth = 1; private var imageHeight = 1
+    /** 0: coordinates are screenshot pixels; otherwise a grid of this size on both axes (Gemini points in 0–1000). */
+    private var grid = 0
+    private val spaceWidth get() = if (grid > 0) grid else imageWidth
+    private val spaceHeight get() = if (grid > 0) grid else imageHeight
+    /** A point the model gave, in the coordinates of the last screen, on the physical screen. A grid's far edge (1000) counts as its last cell. */
+    private fun toScreen(x: Int, y: Int) = physicalPoint(if (grid > 0 && x == grid) grid - 1 else x, if (grid > 0 && y == grid) grid - 1 else y,
+        spaceWidth, spaceHeight, physicalWidth, physicalHeight)
     private var hasImage = false
     private var snapshotTime = 0L
     internal var panel: FloatingPanel? = null
@@ -75,8 +83,8 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         if (getSystemService(KeyguardManager::class.java).isKeyguardLocked) throw UserError("Разблокируйте телефон вручную, затем запустите задачу снова.")
     }
     @Suppress("DEPRECATION")
-    override suspend fun observe(withImage: Boolean): ScreenResult = withContext(Dispatchers.Main.immediate) {
-        unlocked(); clearNodes()
+    override suspend fun observe(withImage: Boolean, grid: Int): ScreenResult = withContext(Dispatchers.Main.immediate) {
+        unlocked(); clearNodes(); this@AgentAccessibilityService.grid = grid.coerceIn(0, 10_000)
         val metrics = android.util.DisplayMetrics()
         (getSystemService(WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.getRealMetrics(metrics)
         physicalWidth = metrics.widthPixels.coerceAtLeast(1); physicalHeight = metrics.heightPixels.coerceAtLeast(1)
@@ -87,10 +95,10 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         snapshotTime = android.os.SystemClock.elapsedRealtime()
         val result = JSONObject().put("snapshot", snapshot).put("package", pkg)
         if (pkg == packageName) {
-            return@withContext ScreenResult(result.put("width", physicalWidth).put("height", physicalHeight)
+            return@withContext ScreenResult(result.put("width", spaceWidth).put("height", spaceHeight)
                 .put("nodes", JSONArray()).put("note", "Открыта Luma. Её внутренний интерфейс скрыт. Для задачи откройте приложение через list_apps и open_app."))
         }
-        var jpeg: String? = null
+        var jpeg: String? = null; var frame: Long? = null
         if (withImage && Build.VERSION.SDK_INT >= 30) {
             panel?.temporarilyHide(true);visuals?.temporarilyHide(true)
             try {
@@ -98,6 +106,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                 val bitmap = screenshot()
                 try {
                     physicalWidth = bitmap.width; physicalHeight = bitmap.height
+                    frame = FrameHash.of(bitmap)
                     val scale = minOf(1f, 1200f / maxOf(bitmap.width, bitmap.height))
                     imageWidth = (bitmap.width * scale).roundToInt().coerceAtLeast(1); imageHeight = (bitmap.height * scale).roundToInt().coerceAtLeast(1)
                     val resized = Bitmap.createScaledBitmap(bitmap, imageWidth, imageHeight, true)
@@ -125,14 +134,15 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         val root = rootInActiveWindow
         if (root?.packageName?.toString().orEmpty() != snapshotPackage) { root?.recycle(); throw UserError("Окно сменилось при чтении экрана. Повторите screen.") }
         root?.let { try { visit(it, 0) } finally { it.recycle() } }
-        ScreenResult(result.put("width", imageWidth).put("height", imageHeight).put("nodes", items).put("image", hasImage), jpeg)
+        if (this@AgentAccessibilityService.grid > 0) result.put("coordinates", "x и y — от 0 до ${this@AgentAccessibilityService.grid} по ширине и высоте экрана, от левого верхнего угла; так же заданы bounds")
+        ScreenResult(result.put("width", spaceWidth).put("height", spaceHeight).put("nodes", items).put("image", hasImage), jpeg, frame)
     }
     private fun signature(node: AccessibilityNodeInfo): String {
         val bounds = Rect(); node.getBoundsInScreen(bounds)
         return "${node.windowId}|${node.viewIdResourceName}|${node.text}|${node.contentDescription}|$bounds"
     }
-    private fun scaledX(x: Int) = (x * imageWidth.toDouble() / physicalWidth).roundToInt()
-    private fun scaledY(y: Int) = (y * imageHeight.toDouble() / physicalHeight).roundToInt()
+    private fun scaledX(x: Int) = (x * spaceWidth.toDouble() / physicalWidth).roundToInt()
+    private fun scaledY(y: Int) = (y * spaceHeight.toDouble() / physicalHeight).roundToInt()
     @Suppress("DEPRECATION")
     private fun validateSnapshot(args: JSONObject) {
         unlocked()
@@ -171,7 +181,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
     }
     /** Text of the smallest labelled element under a screenshot point; labels only, never used to act. */
     private fun textAtPoint(args: JSONObject): String? {
-        val point = runCatching { physicalPoint(args.optInt("x", -1), args.optInt("y", -1), imageWidth, imageHeight, physicalWidth, physicalHeight) }.getOrNull() ?: return null
+        val point = runCatching { toScreen(args.optInt("x", -1), args.optInt("y", -1)) }.getOrNull() ?: return null
         val rect = Rect()
         return nodes.values.mapNotNull { node ->
             val label = node.info.text?.toString()?.takeIf(String::isNotBlank) ?: node.info.contentDescription?.toString()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
@@ -258,7 +268,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                 validateSnapshot(args)
                 fun point(x: String, y: String): Pair<Float, Float> {
                     val px = args.requiredInt(x); val py = args.requiredInt(y)
-                    return physicalPoint(px,py,imageWidth,imageHeight,physicalWidth,physicalHeight)
+                    return toScreen(px, py)
                 }
                 val start = if (name == "tap_point") point("x", "y") else point("x1", "y1")
                 val end=if(name=="swipe") point("x2","y2") else start
