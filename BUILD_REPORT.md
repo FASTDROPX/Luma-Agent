@@ -5,12 +5,14 @@ Package `dev.luma.agent`, versionCode 15, versionName 0.8.0, minSdk 26, target/c
 
 ## Итог
 
-**APK 0.8.0 не собран, Android Lint не запускался.** В облачном окружении, где готовилась
-версия, сетевая политика запрещала `dl.google.com`, а значит и репозиторий Google Maven: плагин
-Android для Gradle (AGP 8.9.2), AndroidX и Compose оттуда не скачать. Без них
-`./gradlew :app:assembleRelease` и `:app:lintDebug` не выполняются. Сборку нужно повторить
-командой ниже там, где Google Maven доступен (локально или в GitHub Actions — workflow уже
-запускает тесты, Lint и debug-сборку).
+Release APK 0.8.0 собран и подписан автором на своём компьютере (`tools/package.py`), потому что
+в облачном окружении, где готовилась версия, `dl.google.com` (Google Maven) был недоступен.
+Подпись v2/v3, сертификат SHA-256 `9e77c1066a58c7f0b2cba1aea59b0387728d4c5f19522af88cd7e32f44d818f7` —
+**новый ключ**: 0.6.0–0.7.0 подписаны `cd92be7b…9971490e`, поэтому 0.8.0 не ставится поверх них.
+Перед публикацией в APK проверены пакет, versionCode 15 / versionName 0.8.0, targetSdk 35,
+список разрешений и наличие нового кода. Юнит-тесты, Android Lint и debug-сборка проходят в
+GitHub Actions (Android CI) на коммите релиза. Ошибку Lint `NewApi` в `DeviceCapabilities.kt`,
+найденную CI, исправили после сборки APK; она не меняет поведения.
 
 ```
 ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleRelease

@@ -21,9 +21,9 @@ jobs:
     timeout-minutes: 45
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
-      # SHA-256 of the certificate that signed 0.6.0 and 0.7.0. Releases signed with another key
+      # SHA-256 of the certificate that signs releases since 0.8.0. A release signed with another key
       # would not install over the previous version, so publishing stops instead.
-      EXPECTED_CERT_SHA256: cd92be7b3608c3a6659983546c8af41ffe449e477a459ea42440b9ba9971490e
+      EXPECTED_CERT_SHA256: 9e77c1066a58c7f0b2cba1aea59b0387728d4c5f19522af88cd7e32f44d818f7
     steps:
       - uses: actions/checkout@v4
         with:
@@ -75,7 +75,7 @@ jobs:
           text = open("CHANGELOG.md", encoding="utf-8").read()
           match = re.search(r"^## " + re.escape(version) + r"\b.*?\n(.*?)(?=^## |\Z)", text, re.S | re.M)
           body = match.group(1).strip() if match else ""
-          head = "Подписан тем же ключом, что 0.7.0: поверх старой версии ставится без удаления. SHA-256 APK — в .sha256."
+          head = "Подписан тем же ключом, что предыдущая версия: ставится поверх без удаления. SHA-256 APK — в .sha256."
           tail = "Полный список изменений — [CHANGELOG.md](https://github.com/FASTDROPX/Luma-Agent/blob/main/CHANGELOG.md)."
           open(os.environ["RUNNER_TEMP"] + "/notes.md", "w", encoding="utf-8").write(head + "\n\n" + body + "\n\n" + tail + "\n")
           EOF
