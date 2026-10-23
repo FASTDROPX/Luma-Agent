@@ -107,7 +107,7 @@ class AttachmentTest {
             db.execSQL("INSERT INTO conversations VALUES(1,'old',1)");db.execSQL("INSERT INTO messages VALUES(1,1,'user','Старая история',1)");db.version=1
         }
         val chats=ChatStore(context)
-        try {chats.select(1);assertEquals("Старая история",chats.messages.value.single().text);assertTrue(chats.messages.value.single().attachments.isEmpty());assertEquals("",chats.messages.value.single().reasoning);assertEquals(4,chats.readableDatabase.version)}
+        try {chats.select(1);assertEquals("Старая история",chats.messages.value.single().text);assertTrue(chats.messages.value.single().attachments.isEmpty());assertEquals("",chats.messages.value.single().reasoning);assertEquals(5,chats.readableDatabase.version)}
         finally {chats.close()}
     }
     @Test fun systemPickerUriIsCopiedWithoutRetainingExternalAccess()=runBlocking {
