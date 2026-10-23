@@ -223,8 +223,8 @@ object ToolRegistry {
     ) + ExtendedToolSpecs.specs + SearchingChat.TOOLS
     private val byName = specs.associateBy { it.name }
     /** Tools that act on the screen or open another app: before the first of them the agent's overlay appears. */
-    fun controlsScreen(name: String): Boolean = byName[name]?.group in setOf("screen", "system") ||
-        name in setOf("open_app", "open_url", "open_settings", "show_alarms", "create_event")
+    fun controlsScreen(name: String): Boolean = name != "wait" && (byName[name]?.group in setOf("screen", "system") ||
+        name in setOf("open_app", "open_url", "open_settings", "show_alarms", "create_event"))
     val names: Set<String> = byName.keys
     operator fun get(name: String): ToolSpec? = byName[name]
 

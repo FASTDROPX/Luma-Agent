@@ -103,6 +103,16 @@ class AccessActionsTest {
         agent.close()
     }
 
+    @Test fun aWaitNeedsNeitherScreenAccessNorCursor() {
+        var step = 0
+        val agent = AgentRun(context, screen = null) { _, _ -> if (step++ == 0) Replies.openAiCall("wait", JSONObject().put("ms", 0)) else Replies.openAiText("Готово") }
+        try {
+            assertEquals("Готово", agent.run("Подожди").last().text)
+            assertFalse(ToolRegistry.controlsScreen("wait")); assertFalse(agent.controller.state.value.screen)
+            assertEquals(2, step)
+        } finally { agent.close() }
+    }
+
     @Test fun storageCannotEscapeSharedStorage() {
         val tools = ExtendedTools(context) { SystemToolResult(Activity.RESULT_CANCELED) }
         for (path in listOf("/data/data/dev.luma.agent/secret", "/storage/emulated/0/../../data/secret", "/sdcard/Android/data/other.app/file")) {
