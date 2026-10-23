@@ -99,7 +99,7 @@ import kotlinx.coroutines.launch
                 Text(repository!!,Modifier.weight(1f),style=MaterialTheme.typography.bodySmall,maxLines=2,overflow=TextOverflow.Ellipsis)
                 IconButton(onClick={openPage(repository!!)}) {Icon(Icons.Outlined.OpenInNew,"Карточка и лицензия")}
             }
-            if(busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=8.dp))
+            if(busy) LumaProgress(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=8.dp))
             MotionLazyColumn(Modifier.weight(1f).fillMaxWidth(),contentPadding=PaddingValues(horizontal=20.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
                 if(error!=null) item { SoftCard { Text(error!!,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium);OutlinedButton(onClick={retry++}){Text("Повторить")}} }
                 else if(!busy) {
@@ -147,8 +147,8 @@ import kotlinx.coroutines.launch
             IconButton(onClick=remove) {Icon(if(item.phase==HubPhase.READY)Icons.Outlined.DeleteOutline else Icons.Outlined.Close,if(item.phase==HubPhase.READY)"Удалить модель" else "Отменить загрузку")}
         }
         Text(item.message,style=MaterialTheme.typography.bodySmall,color=if(item.phase==HubPhase.ERROR)MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-        if(item.phase==HubPhase.DOWNLOADING || item.phase==HubPhase.PAUSED) {val progress=(item.received.toDouble()/item.file.bytes).coerceIn(0.0,1.0).toFloat();LinearProgressIndicator(progress={progress},modifier=Modifier.fillMaxWidth());Text("${sizeLabel(item.received)} / ${sizeLabel(item.file.bytes)} · ${(progress*100).toInt()}%",style=MaterialTheme.typography.labelSmall)}
-        if(item.phase==HubPhase.QUEUED) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if(item.phase==HubPhase.DOWNLOADING || item.phase==HubPhase.PAUSED) {val progress=(item.received.toDouble()/item.file.bytes).coerceIn(0.0,1.0).toFloat();LumaProgress(progress={progress},modifier=Modifier.fillMaxWidth());Text("${sizeLabel(item.received)} / ${sizeLabel(item.file.bytes)} · ${(progress*100).toInt()}%",style=MaterialTheme.typography.labelSmall)}
+        if(item.phase==HubPhase.QUEUED) LumaProgress(Modifier.fillMaxWidth())
         if(item.phase==HubPhase.READY) FilledTonalButton(onClick=share,modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.OpenInNew,null,Modifier.size(18.dp));Spacer(Modifier.width(8.dp));Text("Передать файл")}
         if(item.phase==HubPhase.ERROR) OutlinedButton(onClick=retry,modifier=Modifier.fillMaxWidth()){Text("Повторить загрузку")}
     }

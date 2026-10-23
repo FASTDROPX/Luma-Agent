@@ -65,10 +65,10 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
     /** [reasoning], [stats] and [search] are shown with the answer only; they are never sent back to the model.
      *  [failed] marks an error reply that the chat offers to send again. */
     suspend fun append(chat: Long, role: String, body: String,files: List<Attachment> = emptyList(),reasoning: String = "",stats: TokenStats? = null,failed: Boolean = false,
-        search: WebSearch? = null): Long = withContext(Dispatchers.IO) {
+        search: WebSearch? = null,generatedFiles: List<GeneratedFile> = emptyList()): Long = withContext(Dispatchers.IO) {
         if(files.size>8 || files.sumOf {it.size}>32_000_000) throw UserError("Не больше 8 вложений и 32 МБ в одном сообщении.")
         val now = System.currentTimeMillis()
-        val meta=(stats?.json() ?: JSONObject()).apply { if(failed) put("failed",true); search?.let { put("search",it.json()) } }.takeIf { it.length()>0 }?.toString().orEmpty()
+        val meta=(stats?.json() ?: JSONObject()).apply { if(failed) put("failed",true); search?.let { put("search",it.json()) };if(generatedFiles.isNotEmpty()) put("generatedFiles",org.json.JSONArray(generatedFiles.take(100).map {it.json()})) }.takeIf { it.length()>0 }?.toString().orEmpty()
         val id: Long
         writableDatabase.beginTransaction()
         try {
@@ -116,6 +116,14 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
         writableDatabase.delete("conversations", "id=?", arrayOf(chat.toString()))
         removeUnreferenced(files)
         if (mutableSelected.value == chat) { mutableSelected.value = null; mutableMessages.value = emptyList() }; refresh(); refreshUsage()
+    }
+    /** Clears every chat, including ones outside the 200-row UI page. Usage totals remain accurate. */
+    suspend fun clearAll() = withContext(Dispatchers.IO) {
+        val files=mutableListOf<Attachment>()
+        readableDatabase.rawQuery("SELECT attachments FROM messages",null).use { c -> while(c.moveToNext()) files+=Attachment.decode(c.getString(0)) }
+        writableDatabase.delete("conversations",null,null)
+        removeUnreferenced(files)
+        mutableSelected.value=null; mutableMessages.value=emptyList(); refresh(); refreshUsage()
     }
     private fun removeUnreferenced(files: List<Attachment>) {
         if(files.isEmpty()) return
@@ -194,7 +202,8 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
         readableDatabase.rawQuery("SELECT id,role,body,created,attachments,reasoning,meta FROM messages WHERE chat=? ORDER BY id DESC LIMIT 200", arrayOf(id.toString())).use { c -> while (c.moveToNext()) {
             val meta=c.getString(6)
             val search=runCatching {WebSearch.parse(JSONObject(meta.orEmpty().ifBlank {"{}"}).optJSONObject("search"))}.getOrNull()
-            result += ChatMessage(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3),Attachment.decode(c.getString(4)),c.getString(5),TokenStats.parse(meta),isFailed(meta),search)
+            val generated=runCatching {GeneratedFile.decode(JSONObject(meta.orEmpty().ifBlank {"{}"}).optJSONArray("generatedFiles"))}.getOrDefault(emptyList())
+            result += ChatMessage(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3),Attachment.decode(c.getString(4)),c.getString(5),TokenStats.parse(meta),isFailed(meta),search,generated)
         } }
         mutableMessages.value = result.reversed()
     }

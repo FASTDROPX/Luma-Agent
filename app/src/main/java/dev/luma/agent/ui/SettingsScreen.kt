@@ -82,7 +82,10 @@ import kotlin.math.roundToInt
                 item { SoftCard {
                     Text("Палитра Luma",style=MaterialTheme.typography.titleMedium)
                     Text("Выбор палитры отключит цвета обоев.",style=MaterialTheme.typography.bodySmall)
-                    listOf(Triple("sky","Ледяной голубой",0xff95c9ff),Triple("lilac","Лаванда",0xffc6aaff),Triple("mint","Мята",0xff8edac5),Triple("peach","Персик",0xffffb59a)).forEach {(id,label,color)->
+                    listOf(Triple("sky","Ледяной голубой",0xff95c9ff),Triple("lilac","Лаванда",0xffc6aaff),Triple("mint","Мята",0xff8edac5),Triple("peach","Персик",0xffffb59a),
+                        Triple("violet","Электрический фиолетовый",0xffa450ff),Triple("cobalt","Кобальт",0xff3978f6),
+                        Triple("rose","Розовый",0xffee85ac),Triple("teal","Бирюза",0xff00bea6),
+                        Triple("citrus","Лимонный",0xfff8df58),Triple("orange","Мандарин",0xfff2652c),Triple("graphite","Графит",0xffbcb6b1)).forEach {(id,label,color)->
                         FilterChip(!settings.dynamicColors && visuals.palette==id,onClick={graph.update {it.copy(dynamicColors=false,visuals=it.visuals.copy(palette=id))}},label={Text(label)},leadingIcon={Box(Modifier.size(16.dp).background(Color(color),CircleShape))},modifier=Modifier.fillMaxWidth())
                     }
                 } }
@@ -155,7 +158,7 @@ import kotlin.math.roundToInt
             "agent" -> {
                 item { SoftCard {
                     AgentAccessMode(settings.confirmActions,enabled=!busy && !run.active) {ask->graph.update {it.copy(confirmActions=ask)}}
-                    Text("Удаление, перемещение, перезапись файлов и нажатия со словами из списка «Запрещённые слова» (Параметры модели) требуют отдельного подтверждения. Режим не выдаёт новые разрешения Android.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("В полном доступе Luma выполняет порученную задачу без дополнительных подтверждений. Разрешения и системные окна Android остаются под вашим контролем.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     SettingToggle("Плавающая панель","Разворачиваемая панель шагов; кнопка «Стоп» доступна всегда",settings.panel) {v->graph.update {it.copy(panel=v)}}
                     TextButton(onClick=openAccess) {Icon(Icons.Outlined.Security,null);Spacer(Modifier.width(8.dp));Text("Разрешения и папка для файлов")}
                 } }

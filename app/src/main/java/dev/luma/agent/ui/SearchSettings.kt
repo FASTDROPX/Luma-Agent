@@ -80,7 +80,7 @@ import dev.luma.agent.core.validateEndpoint
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = { graph.checkSearch() }, enabled = !check.busy, modifier = Modifier.testTag("search-check")) { Text("Проверить поиск") }
-                if (check.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                if (check.busy) LumaLoading(Modifier.size(20.dp))
             }
             check.reply?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
             check.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }

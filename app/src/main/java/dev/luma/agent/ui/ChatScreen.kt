@@ -1,3 +1,4 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package dev.luma.agent.ui
 
 import android.app.Activity
@@ -142,6 +143,9 @@ import kotlin.math.roundToInt
         else if(runtime.isNotEmpty()) { requestedPermissions = runtime; permissionLauncher.launch(runtime.toTypedArray()) }
         else dev.luma.agent.core.BackgroundAccess.open(context,dev.luma.agent.core.OptionalAccess.item(need.id)?.screens(context) ?: dev.luma.agent.core.OptionalAccess.appDetails(context))
     }
+    LaunchedEffect(run.systemAction?.id,settings.confirmActions) {
+        if(!settings.confirmActions) run.systemAction?.let {launchToolAction(it)}
+    }
     // Coming back from a settings screen (special access): re-check whether it is now on.
     val lifecycleOwner=androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -166,6 +170,8 @@ import kotlin.math.roundToInt
     // In agent mode the task looks like a chat reply until the agent actually does something.
     val agentThinking=relevantRun && !run.acting && run.approval==null && run.permission==null && run.systemAction==null && !run.paused && !run.retryPending
     val pending=(busy && !run.active && messages.lastOrNull()?.role!="assistant") || agentThinking
+    var optionsOpen by rememberSaveable {mutableStateOf(false)}
+    val screenConnected by dev.luma.agent.AgentAccessibilityService.connected.collectAsStateWithLifecycle()
     val searching=settings.webSearch
     val chatStatus by graph.chatStatus.collectAsStateWithLifecycle()
     val latestAnswer=messages.lastOrNull {it.role=="assistant"}?.id
@@ -268,27 +274,24 @@ import kotlin.math.roundToInt
                 Text(sentPreview,Modifier.padding(horizontal=16.dp,vertical=10.dp),maxLines=2,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.bodyMedium)
             }
         }
-        Surface(Modifier.padding(horizontal=12.dp,vertical=8.dp).fillMaxWidth(),shape=RoundedCornerShape(30.dp),
+        Surface(Modifier.padding(horizontal=12.dp,vertical=4.dp).fillMaxWidth(),shape=RoundedCornerShape(26.dp),
             color=MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=.76f),shadowElevation=6.dp,
             border=BorderStroke(.8.dp,MaterialTheme.colorScheme.outlineVariant.copy(alpha=.35f))) {
             Column(Modifier.padding(horizontal=10.dp,vertical=6.dp).testTag("chat-composer")) {
                 Row(Modifier.padding(start=4.dp),verticalAlignment=Alignment.CenterVertically) {
-                  // The chips scroll sideways on a narrow screen; the access button stays at the end.
-                  Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
+                  Row(Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
                     FilterChip(!asAgent,{graph.setAgentMode(false)},label={Text("Чат")},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(15.dp))})
                     FilterChip(asAgent,{graph.setAgentMode(true)},label={Text("Агент")},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(15.dp))})
-                    // Web search for chat replies: the provider's own, or through Luma for any model.
-                    // «Глубокие размышления»: after a failed step the agent analyses it and tries another way.
-                    if(asAgent) FilterChip(settings.deepThinking,{graph.update {it.copy(deepThinking=!it.deepThinking)}},label={Text("Размышления")},
-                        leadingIcon={Icon(Icons.Outlined.Psychology,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-deep-thinking"))
-                    FilterChip(searching,{graph.update {it.copy(webSearch=!it.webSearch)}},label={Text("Поиск")},leadingIcon={Icon(Icons.Outlined.TravelExplore,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-web-search"))
                   }
-                    if(asAgent) IconButton(onClick=openAccess) {Icon(Icons.Outlined.Security,"Доступ агента",Modifier.size(20.dp))}
+                  IconButton(onClick={optionsOpen=true},modifier=Modifier.testTag("chat-options")) {
+                      Icon(Icons.Outlined.Tune,"Параметры чата",tint=if(searching || settings.deepThinking && asAgent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                  }
+                  if(asAgent && !screenConnected) IconButton(onClick=openAccess,modifier=Modifier.testTag("screen-access-needed")) {Icon(Icons.Outlined.Security,"Доступ агента",Modifier.size(20.dp))}
                 }
                 if(files.isNotEmpty()) AttachmentStrip(files,graph.chats.attachments) {file ->
                     if(!busy && files.any {it.id==file.id}) {files=files.filterNot {it.id==file.id};scope.launch(Dispatchers.IO) {graph.chats.attachments.file(file).delete()}}
                 }
-                if(importing) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical=4.dp))
+                if(importing) LumaProgress(Modifier.fillMaxWidth().padding(vertical=4.dp))
                 // Attach, text and send share one 44 dp line; with more lines the buttons stay at the bottom.
                 Row(Modifier.fillMaxWidth().padding(vertical=2.dp),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.Bottom) {
                     IconButton(onClick={picker.launch(arrayOf("*/*"))},enabled=!busy && !run.active && !importing && files.size<4,modifier=Modifier.size(44.dp).testTag("chat-attach")) {Icon(Icons.Outlined.Add,"Прикрепить файлы",Modifier.size(24.dp))}
@@ -302,6 +305,22 @@ import kotlin.math.roundToInt
                 }
                 AgentAccessMode(settings.confirmActions,enabled=!busy && !run.active) {ask->graph.update {it.copy(confirmActions=ask)}}
             }
+        }
+    }
+    if(optionsOpen) ModalBottomSheet(onDismissRequest={optionsOpen=false}) {
+        Column(Modifier.fillMaxWidth().padding(horizontal=24.dp).padding(bottom=28.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Text("Параметры чата",style=MaterialTheme.typography.headlineSmall)
+            Row(verticalAlignment=Alignment.CenterVertically) {
+                Icon(Icons.Outlined.TravelExplore,null);Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {Text("Поиск в интернете");Text("Находить источники и читать страницы",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                Switch(searching,{graph.update {s->s.copy(webSearch=it)}},Modifier.testTag("chat-web-search"))
+            }
+            Row(verticalAlignment=Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Psychology,null);Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {Text("Глубокие размышления");Text("В режиме агента: разбирать неудачи и выбирать другой способ",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                Switch(settings.deepThinking,{graph.update {s->s.copy(deepThinking=it)}},Modifier.testTag("chat-deep-thinking"))
+            }
+            TextButton(onClick={optionsOpen=false;openAccess()}) {Icon(Icons.Outlined.Security,null);Spacer(Modifier.width(8.dp));Text("Доступы и рабочая папка")}
         }
     }
 }
@@ -384,6 +403,10 @@ import kotlin.math.roundToInt
                 if(pictures.isNotEmpty()) GeneratedImages(pictures,files)
                 if(other.isNotEmpty()) AttachmentStrip(other,files)
                 if(message.text.isNotBlank()) MarkdownContent(message.text,Modifier.fillMaxWidth(),onCursor=onCursor,onGrowth=onGrowth,onLongPress=openMenu)
+                val generated=message.generatedFiles + message.attachments.map {file ->
+                    dev.luma.agent.core.GeneratedFile(file.name,android.net.Uri.fromFile(files.file(file)).toString(),file.size,message.timestamp,file.mime)
+                }
+                if(generated.isNotEmpty()) GeneratedFiles(generated)
                 AnswerActions(message,more=openMenu)
             }
             actions?.let {MessageMenu(menu,{menu=false},it,user=false,select=if(message.text.isNotBlank()) {{selecting=true}} else null)}

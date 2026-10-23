@@ -103,7 +103,7 @@ import dev.luma.agent.core.*
                 }
                 AnimatedVisibility(busy) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        LumaProgress(Modifier.fillMaxWidth())
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Загружаю модели… До 20 с", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall); TextButton(onClick = { graph.cancelCatalog() }) { Text("Отмена") } }
                     }
                 }
@@ -172,7 +172,7 @@ import dev.luma.agent.core.*
             if (provider == Provider.LOCAL) OutlinedTextField(endpoint, editEndpoint, Modifier.fillMaxWidth().testTag("setup-endpoint"), singleLine = true, label = { Text("Адрес API") }, placeholder = { Text("http://192.168.1.10:11434/v1/") }, shape = MaterialTheme.shapes.medium, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), trailingIcon = { IconButton(onClick = { localKey = true }) { Icon(Icons.Outlined.Key, "Ключ сервера") } })
             else SetupKeyField(key, editKey, reveal, toggleReveal, paste, Modifier.testTag("setup-key"))
             if (busy) Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                LumaLoading(Modifier.size(20.dp))
                 Text("Модели · до 20 с", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = { graph.cancelCatalog() }) { Text("Отмена") }
             } else Button(onClick = { keyboard?.hide(); save() }, enabled = (!provider.keyRequired || key.isNotBlank()) && (provider != Provider.LOCAL || endpoint.isNotBlank()), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("setup-save")) {
@@ -234,7 +234,7 @@ import dev.luma.agent.core.*
                 Text("Короткий запрос к выбранной модели", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             FilledTonalButton(onClick = { graph.checkConnection() }, enabled = !check.busy, modifier = Modifier.testTag("check-connection")) {
-                if (check.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else Icon(Icons.Outlined.NetworkCheck, null, Modifier.size(18.dp))
+                if (check.busy) LumaLoading(Modifier.size(16.dp)) else Icon(Icons.Outlined.NetworkCheck, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp)); Text("Проверить")
             }
         }

@@ -108,7 +108,7 @@ class MessageActions(val copy: () -> Unit, val share: () -> Unit, val delete: ()
             val shape = RoundedCornerShape(18.dp)
             Box(Modifier.widthIn(max = 360.dp).fillMaxWidth().clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable { open = image }.testTag("generated-image")) {
                 val b = bitmap
-                if (b == null) Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp) }
+                if (b == null) Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) { LumaLoading(Modifier.size(28.dp)) }
                 else Image(b, image.name, Modifier.fillMaxWidth().aspectRatio(b.width.toFloat() / b.height.coerceAtLeast(1)), contentScale = ContentScale.Fit)
             }
         }

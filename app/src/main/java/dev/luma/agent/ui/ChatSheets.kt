@@ -81,6 +81,7 @@ import kotlinx.coroutines.withContext
     var found by remember { mutableStateOf<List<Conversation>?>(null) }
     var renaming by remember { mutableStateOf<Conversation?>(null) }
     var deleting by remember { mutableStateOf<Conversation?>(null) }
+    var clearAll by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(query, conversations) {
         if (query.isBlank()) { found = null; return@LaunchedEffect }
@@ -98,7 +99,10 @@ import kotlinx.coroutines.withContext
     }
     val shown = found ?: conversations
     ModalBottomSheet(onDismissRequest = close) {
-        Text("История чатов", Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.headlineSmall)
+        Row(Modifier.fillMaxWidth().padding(start=24.dp,end=12.dp),verticalAlignment=Alignment.CenterVertically) {
+            Text("История чатов",Modifier.weight(1f),style=MaterialTheme.typography.titleLarge)
+            TextButton(onClick={clearAll=true},enabled=conversations.isNotEmpty(),modifier=Modifier.testTag("history-clear-all")) {Text("Очистить все")}
+        }
         OutlinedTextField(query, { query = it.take(80) }, Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp).testTag("history-search"),
             placeholder = { Text("Поиск по чатам") }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
             trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "Очистить") } },
@@ -142,6 +146,13 @@ import kotlinx.coroutines.withContext
             confirmButton = { TextButton(onClick = { scope.launch { graph.chats.delete(chat.id) }; deleting = null }) { Text("Удалить") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Отмена") } })
     }
+    if(clearAll) AlertDialog(onDismissRequest={clearAll=false},title={Text("Очистить всю историю?")},
+        text={Text("Все чаты и их вложения будут удалены с телефона. Текущая задача остановится. Файлы в выбранной рабочей папке останутся.")},
+        confirmButton={TextButton(onClick={
+            clearAll=false
+            scope.launch { runCatching {graph.clearHistory()}.onFailure {graph.uiMessage.value="Не удалось очистить историю."} }
+        },modifier=Modifier.testTag("history-clear-confirm")) {Text("Очистить все")}},
+        dismissButton={TextButton(onClick={clearAll=false}) {Text("Отмена")}})
 }
 
 private fun fileName(title: String) = title.replace(Regex("[\\\\/:*?\"<>|\\n\\r\\t]"), " ").trim().take(60).ifBlank { "Чат" } + ".md"

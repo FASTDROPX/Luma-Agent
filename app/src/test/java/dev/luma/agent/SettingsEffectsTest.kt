@@ -41,17 +41,17 @@ class SettingsEffectsTest {
             assertEquals("ok",api.generate(provider,connection,listOf(Turn("user","hello")),system,agent))
         }
     }
-    @Test fun fullAccessSkipsOrdinaryStepsAndAskModeWaitsWhileImportantActionsStayExplicit() {
+    @Test fun fullAccessSkipsAllLumaConfirmationsAndAskModeStillWaits() {
         fun tool(name: String,args: JSONObject=JSONObject())=AgentReply.Tool(name,args,"")
         for(name in listOf("tap","tap_point","swipe","scroll","set_text","open_app","write_text","home","back")) {
             assertFalse(name,AgentApprovalPolicy.requiresApproval(tool(name),false))
             assertTrue(name,AgentApprovalPolicy.requiresApproval(tool(name),true))
         }
         for(name in listOf("screen","list_apps","read_text","list_files","wait")) assertFalse(AgentApprovalPolicy.requiresApproval(tool(name),true))
-        assertTrue(AgentApprovalPolicy.requiresApproval(tool("delete_file"),false))
-        assertTrue(AgentApprovalPolicy.requiresApproval(tool("move_file"),false))
-        assertTrue(AgentApprovalPolicy.requiresApproval(tool("write_text",JSONObject().put("overwrite",true)),false))
-        assertTrue(AgentApprovalPolicy.requiresApproval(tool("tap"),false,true))
+        assertFalse(AgentApprovalPolicy.requiresApproval(tool("delete_file"),false))
+        assertFalse(AgentApprovalPolicy.requiresApproval(tool("move_file"),false))
+        assertFalse(AgentApprovalPolicy.requiresApproval(tool("write_text",JSONObject().put("overwrite",true)),false))
+        assertFalse(AgentApprovalPolicy.requiresApproval(tool("tap"),false,true))
         assertFalse(AppSettings.parse(AppSettings(confirmActions=false).json()).confirmActions)
     }
     @Test fun oldVaultRetainsConnectionAndGetsCompatibleDefaults() {

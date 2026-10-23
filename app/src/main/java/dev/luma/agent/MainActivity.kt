@@ -71,6 +71,9 @@ private data class Destination(val title: String, val icon: ImageVector)
     var models by remember { mutableStateOf(false) }
     val shared by graph.sharedContent.collectAsStateWithLifecycle()
     LaunchedEffect(shared) { if (shared != null) { tab = 0; history = false } }
+    LaunchedEffect(run.systemAction?.id,settings.confirmActions) {
+        if(run.systemAction!=null && !settings.confirmActions) {tab=0;history=false;graph.chats.select(run.chatId)}
+    }
     BackHandler(enabled = settings.onboarded && tab != 0 && !history) { tab = 0 }
     LaunchedEffect(requested) { tab = if (requested == "access") 2 else 0 }
     LaunchedEffect(notice) { notice?.let { snackbar.showSnackbar(dev.luma.agent.core.Tone.adapt(it, graph.vault.state.value.formal)); graph.uiMessage.value = null } }
@@ -99,8 +102,8 @@ private data class Destination(val title: String, val icon: ImageVector)
                             }
                             if (settings.tokenMeter) TokenMeter(tokenStats, chatBusy || run.active, usage = usage)
                         }
-                    }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)) },
-                    bottomBar = { if (!keyboardOpen) NavigationBar(containerColor = androidx.compose.ui.graphics.Color.Transparent, tonalElevation = 0.dp) { destinations.forEachIndexed { i, destination -> NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(destination.icon, destination.title) }, label = { Text(destination.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }) } } }
+                    }, expandedHeight = 56.dp, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)) },
+                    bottomBar = { if (!keyboardOpen) NavigationBar(modifier=Modifier.height(64.dp + with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }), containerColor = androidx.compose.ui.graphics.Color.Transparent, tonalElevation = 0.dp) { destinations.forEachIndexed { i, destination -> NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(destination.icon, destination.title) }, label = { Text(destination.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }) } } }
                 ) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding)) {
                         if (run.active && (tab != 0 || selectedChat != run.chatId)) Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth().clickable { tab = 0; scope.launch { graph.chats.select(run.chatId) } }) {

@@ -71,6 +71,7 @@ import dev.luma.agent.*
     if (onboarding) CompactAccess(graph, connected, notificationsAllowed, { explanation = true }, { folder.launch(null) }, requestNotification, addTile)
     else MotionLazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { PageTitle("ДОСТУП", "Разрешения агента", "Обычному чату они не нужны. Включайте только то, что понадобится агенту.") }
+        item { AllAccessButton(graph) { resumed++ } }
         item {
             AccessCard(Icons.Outlined.TouchApp, "Управление экраном", if (connected) "Luma подключена к специальным возможностям" else "Чтение элементов, нажатия, прокрутка и ввод текста", connected, if (connected) "Настройки службы" else "Как включить") { explanation = true }
         }
@@ -131,14 +132,15 @@ import dev.luma.agent.*
     var options by remember { mutableStateOf(false) }
     BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 4.dp).testTag("setup-access")) {
         val tight = maxHeight / LocalDensity.current.fontScale < 330.dp
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(if (tight) 6.dp else 12.dp, Alignment.CenterVertically)) {
+        Column(Modifier.fillMaxSize().motionScroll(), verticalArrangement = Arrangement.spacedBy(if (tight) 6.dp else 12.dp, Alignment.CenterVertically)) {
             Text("Доступ для агента", Modifier.fillMaxWidth(), style = MaterialTheme.typography.headlineSmall)
             Text("Для чата разрешения не нужны.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            AllAccessButton(graph)
             PermissionRow(Icons.Outlined.TouchApp, "Управление экраном", if (connected) "Включено" else "Включить службу Luma", connected, "setup-screen-access", screen)
             PermissionRow(Icons.Outlined.FolderOpen, "Файлы", if (settings.folder.isBlank()) "Выбрать доступную папку" else "Папка выбрана", settings.folder.isNotBlank(), "setup-folder-access", folder)
             if (Build.VERSION.SDK_INT >= 33) PermissionRow(Icons.Outlined.NotificationsNone, "Уведомления", if (notifications) "Разрешены" else "Разрешить статус и остановку", notifications, "setup-notification-access", notify)
             OutlinedButton(onClick = { options = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("setup-access-options")) { Icon(Icons.Outlined.Tune, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Панель и снимки") }
-            if (!tight) Text("Каждый доступ включается отдельно. Изменить его можно во вкладке «Доступ».", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (!tight) Text("Доступы можно выдать по одному или пройти все запросы подряд. Изменить их можно во вкладке «Доступ».", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
     if (options) AlertDialog(onDismissRequest = { options = false }, title = { Text("Панель и снимки") }, text = {

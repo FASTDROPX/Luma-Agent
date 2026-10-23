@@ -88,12 +88,6 @@ private fun icon(id: String): ImageVector = when (id) {
                     Spacer(Modifier.height(4.dp))
                     Text(group.title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     Text(group.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (group == OptionalAccess.Group.RESERVE) {
-                        val missing = remember(resumed) { OptionalAccess.missing(context, group) }
-                        if (missing.isNotEmpty()) OutlinedButton(onClick = { ask(missing) }, Modifier.fillMaxWidth().testTag("optional-access-all")) {
-                            Text("Запросить обычные разрешения разом (${missing.size})")
-                        }
-                    }
                     rows.forEach { item ->
                         AccessRow(icon(item.id), item.title, item.purpose, granted[item.id] == true, "access-${item.id}") { press(item) }
                     }

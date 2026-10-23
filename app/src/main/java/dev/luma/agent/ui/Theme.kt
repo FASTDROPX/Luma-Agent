@@ -61,11 +61,22 @@ private fun paletteScheme(palette: String,dark: Boolean): ColorScheme {
     val accent=when(palette) { "lilac" -> if(dark) Color(0xFFD0BCFF) else Color(0xFF6750A4)
         "mint" -> if(dark) Color(0xFF8EDAC5) else Color(0xFF006B54)
         "peach" -> if(dark) Color(0xFFFFB59A) else Color(0xFF984524)
+        "violet" -> if(dark) Color(0xFFD4ACFF) else Color(0xFF7400D9)
+        "cobalt" -> if(dark) Color(0xFFAAC4FF) else Color(0xFF245CE0)
+        "rose" -> if(dark) Color(0xFFFFB0CC) else Color(0xFFAF325F)
+        "teal" -> if(dark) Color(0xFF71DBC9) else Color(0xFF006B61)
+        "citrus" -> if(dark) Color(0xFFF2DE61) else Color(0xFF756000)
+        "orange" -> if(dark) Color(0xFFFFB18A) else Color(0xFFA43C0A)
+        "graphite" -> if(dark) Color(0xFFD5D1CD) else Color(0xFF5D5855)
         else -> return base }
     val container=androidx.compose.ui.graphics.lerp(base.surface,accent,if(dark) .24f else .18f)
     return base.copy(primary=accent,onPrimary=if(dark) Color(0xFF17202B) else Color.White,
         primaryContainer=container,onPrimaryContainer=if(dark) Color(0xFFF1EFFF) else Color(0xFF1E2330),
         secondary=accent,secondaryContainer=container,onSecondaryContainer=base.onSurface,
+        background=androidx.compose.ui.graphics.lerp(base.background,accent,if(dark) .035f else .025f),
+        surfaceContainer=androidx.compose.ui.graphics.lerp(base.surfaceContainer,accent,.055f),
+        surfaceContainerHigh=androidx.compose.ui.graphics.lerp(base.surfaceContainerHigh,accent,.07f),
+        tertiary=if(dark) Color(0xFFE7BDD4) else Color(0xFF7F4B67),
         surfaceTint=accent,outline=androidx.compose.ui.graphics.lerp(base.outline,accent,.25f))
 }
 @Composable private fun animatedScheme(target: ColorScheme,reduced: Boolean): ColorScheme {

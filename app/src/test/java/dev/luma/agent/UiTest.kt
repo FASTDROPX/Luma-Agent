@@ -40,6 +40,23 @@ class UiTest {
     private lateinit var graph: AppGraph
     @Before fun setup(){TestKeys.install();graph=(ApplicationProvider.getApplicationContext<LumaApp>()).graph;runBlocking{graph.vault.update{it.copy(reducedMotion=true,dynamicColors=false,theme="dark")}}}
     @After fun teardown(){graph.scope.coroutineContext[kotlinx.coroutines.Job]?.cancel();TestKeys.restore()}
+    @Test fun composerHasTwoModesAndOptionsStayInASheet() {
+        runBlocking {graph.vault.update {it.copy(onboarded=true)}}
+        compose.setContent {AppRoot(graph)}
+        compose.onAllNodesWithTag("chat-web-search").assertCountEquals(0)
+        compose.onAllNodesWithTag("chat-deep-thinking").assertCountEquals(0)
+        compose.onNodeWithTag("chat-options").performClick()
+        compose.onNodeWithTag("chat-web-search").assertIsDisplayed().performClick()
+        compose.waitUntil(5000) {graph.vault.state.value.webSearch}
+        compose.onNodeWithTag("chat-deep-thinking").assertIsDisplayed()
+    }
+    @Test fun accessAndOnboardingBothOfferTheBatchRequest() {
+        compose.setContent {val settings by graph.vault.state.collectAsStateWithLifecycle();LumaTheme(settings) {AccessScreen(graph)}}
+        compose.onNodeWithTag("request-all-access").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Запросить все доступы?").assertIsDisplayed()
+        compose.onNodeWithText("Отмена").performClick()
+        compose.onAllNodesWithTag("optional-access-all").assertCountEquals(0)
+    }
     @Test fun onboardingExplainsAppAndOffersExplicitClipboardAction() {
         compose.setContent{AppRoot(graph)}
         compose.onNodeWithText("Чат с ИИ\nи помощь на телефоне").assertIsDisplayed()
@@ -62,7 +79,7 @@ class UiTest {
         containedText("Доступ включаешь ты","setup-welcome")
         screenshot("07-small-welcome-130")
         compose.onNodeWithTag("setup-next").performClick()
-        listOf("setup-screen-access","setup-folder-access","setup-notification-access","setup-access-options").forEach { contained(it,"setup-access") }
+        listOf("request-all-access","setup-screen-access","setup-folder-access","setup-notification-access","setup-access-options").forEach { compose.onNodeWithTag(it).performScrollTo(); contained(it,"setup-access") }
         containedText("Доступ для агента","setup-access")
         screenshot("08-small-permissions-130")
         compose.onNodeWithTag("setup-screen-access").performClick()
@@ -293,6 +310,13 @@ class UiTest {
         contained("agent-access-mode","chat-composer")
         compose.onNodeWithTag("agent-access-mode").performClick()
         compose.onNodeWithTag("access-mode-full").performClick()
+        compose.onNodeWithTag("confirm-full-access").assertIsDisplayed()
+        assertTrue(graph.vault.state.value.confirmActions)
+        compose.onNodeWithText("Отмена").performClick()
+        assertTrue(graph.vault.state.value.confirmActions)
+        compose.onNodeWithTag("agent-access-mode").performClick()
+        compose.onNodeWithTag("access-mode-full").performClick()
+        compose.onNodeWithTag("confirm-full-access").performClick()
         compose.waitUntil(5000) {!graph.vault.state.value.confirmActions}
         compose.onNodeWithText("Полный доступ").assertIsDisplayed()
         assertFalse(SettingsVault(compose.activity).state.value.confirmActions)

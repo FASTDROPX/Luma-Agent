@@ -59,7 +59,9 @@ class FolderTools(private val context: Context, private val rootUri: String) {
     private fun created(file: DocumentFile, requested: String, path: String, extra: JSONObject.() -> Unit = {}): JSONObject =
         JSONObject().put("status", ToolStatus.DONE).put("verified", file.exists()).put("path", path).put("actualName", file.name).apply {
             if (file.name != requested) put("note", "Хранилище сохранило файл под именем «${file.name}».")
-        }.apply(extra)
+        }.apply(extra).apply {
+            if(file.isFile) put("artifact",GeneratedFile(file.name ?: requested,file.uri.toString(),file.length(),System.currentTimeMillis(),file.type ?: mimeFor(requested),file.parentFile?.uri?.toString().orEmpty()).json())
+        }
 
     suspend fun run(name: String, args: JSONObject): JSONObject = withContext(Dispatchers.IO) {
         try {
@@ -145,7 +147,7 @@ class FolderTools(private val context: Context, private val rootUri: String) {
                             throw ToolFailure(ToolStatus.UNKNOWN, "Хранилище записало неожиданный размер; восстановлено прежнее содержимое $path. Проверьте файл.")
                         }
                     }
-                    JSONObject().put("status", ToolStatus.DONE).put("verified", true).put("path", path).put("bytes", existing.length()).put("appended", bytes.size)
+                    created(existing,title,path) {put("bytes",existing.length()).put("appended",bytes.size)}
                 }
                 "create_folder" -> {
                     val p = parts(args.getString("path")); if (p.isEmpty()) throw ToolFailure(ToolStatus.ERROR, "Укажите имя папки.")
@@ -163,6 +165,7 @@ class FolderTools(private val context: Context, private val rootUri: String) {
                     if (parent.findFile(newName) != null) throw ToolFailure(ToolStatus.ERROR, "Имя «$newName» уже занято.", code = "exists")
                     val file = resolve(args.getString("path")); if (!file.renameTo(newName)) throw ToolFailure(ToolStatus.ERROR, "Не удалось переименовать.")
                     JSONObject().put("status", ToolStatus.DONE).put("verified", parent.findFile(file.name.orEmpty()) != null).put("name", file.name).put("path", Workspace.display(p.dropLast(1) + file.name.orEmpty()))
+                        .apply {if(file.isFile) put("artifact",GeneratedFile(file.name ?: newName,file.uri.toString(),file.length(),System.currentTimeMillis(),file.type ?: mimeFor(newName),parent.uri.toString()).json())}
                 }
                 "copy_file", "move_file" -> {
                     val source = resolve(args.getString("from")); if (!source.isFile || source.length() > 20_000_000) throw ToolFailure(ToolStatus.ERROR, "Можно переносить отдельные файлы до 20 МБ.")
@@ -184,6 +187,7 @@ class FolderTools(private val context: Context, private val rootUri: String) {
                     currentCoroutineContext().ensureActive()
                     val moved = name == "move_file" && source.delete()
                     JSONObject().put("status", ToolStatus.DONE).put("verified", true).put("copied", to).put("actualName", target.name).put("sourceDeleted", moved)
+                        .put("artifact",GeneratedFile(target.name ?: targetName,target.uri.toString(),target.length(),System.currentTimeMillis(),target.type ?: mimeFor(targetName),targetParent.uri.toString()).json())
                         .put("note", if (name == "move_file" && !moved) "Копия сохранена, исходный файл не удалось удалить." else "Готово")
                 }
                 "delete_file" -> {

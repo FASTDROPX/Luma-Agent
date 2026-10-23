@@ -49,7 +49,7 @@ data class VisualSettings(val palette: String = "sky", val blackBackground: Bool
     val smoothInput: Boolean = true, val motionBlur: Boolean = false, val blurStrength: Float = .45f,
     val particleCount: Int = 144, val orbitSpeed: Float = 1f, val returnDelay: Float = 3f,
     val cursor: Boolean = true, val edgeGlow: Boolean = true, val glowIntensity: Float = .7f) {
-    fun sanitized() = copy(palette = palette.takeIf { it in listOf("sky","lilac","mint","peach") } ?: "sky",
+    fun sanitized() = copy(palette = palette.takeIf { it in listOf("sky","lilac","mint","peach","violet","cobalt","rose","teal","citrus","orange","graphite") } ?: "sky",
         blurStrength = blurStrength.finiteClamp(.1f,1f,.45f), particleCount = particleCount.coerceIn(36,180),
         orbitSpeed = orbitSpeed.finiteClamp(.4f,2f,1f), returnDelay = returnDelay.finiteClamp(2f,6f,3f),
         glowIntensity = glowIntensity.finiteClamp(.2f,1f,.7f))
@@ -145,7 +145,8 @@ fun safeError(error: Throwable): String = if (error is UserError) error.message 
 data class Turn(val role: String, val text: String, val image: String? = null, val attachments: List<AttachmentData> = emptyList(),
     val toolCalls: List<ToolCall> = emptyList(), val toolCallId: String? = null, val toolName: String? = null)
 data class ChatMessage(val id: Long, val role: String, val text: String, val timestamp: Long, val attachments: List<Attachment> = emptyList(),
-    val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false, val search: WebSearch? = null)
+    val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false, val search: WebSearch? = null,
+    val generatedFiles: List<GeneratedFile> = emptyList())
 data class Conversation(val id: Long, val title: String, val updated: Long, val pinned: Boolean = false, val agent: Boolean = false)
 data class Approval(val title: String, val details: String, val background: Boolean = false)
 /** An access a tool needs that is off: the chat shows a «выдайте доступ» card, and the task continues once it is granted. */

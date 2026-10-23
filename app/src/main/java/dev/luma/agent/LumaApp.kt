@@ -47,7 +47,12 @@ class AppGraph(val context: Context) {
     val appVisible: Boolean get() = visibleScreens.get() > 0
     internal var orbAnchor: OrbAnchor?=null
     private var pendingHandoff: OrbHandoff?=null
-    internal fun takeOrbHandoff(): OrbHandoff?=pendingHandoff.also {pendingHandoff=null}
+    internal fun takeOrbHandoff(): OrbHandoff? {
+        // Capture where the orb is NOW: after sending it has moved from the welcome screen into the run card.
+        val live=orbAnchor?.takeIf {android.os.SystemClock.uptimeMillis()-it.at<2000 && appVisible}
+            ?.let {OrbHandoff(it.x,it.y,it.radius,it.seeds())}
+        return (live ?: pendingHandoff).also {pendingHandoff=null}
+    }
     private var catalogJob: Job? = null; private var catalogRevision = 0
     private var chatJob: Job? = null
     private var chatRevision = 0
@@ -167,6 +172,12 @@ class AppGraph(val context: Context) {
         }
     }
     fun deleteMessage(id: Long) { scope.launch { runCatching { chats.deleteMessage(id) }.onFailure { uiMessage.value = safeError(it) } } }
+    suspend fun clearHistory() {
+        val pendingChat=chatJob
+        cancelChat();agent.stopAndJoin();pendingChat?.join()
+        // Cancellation can append a final status; wait for it before deleting the referenced chat rows.
+        chats.clearAll()
+    }
     internal fun consumeAgentRequest(token: String?): Boolean {
         if (token == null || pendingAgentRequest != token) return false
         pendingAgentRequest = null; return true

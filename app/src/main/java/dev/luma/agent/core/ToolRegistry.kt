@@ -170,7 +170,7 @@ object ToolRegistry {
             "matches", sideEffect = false, label = { "Ищу файл «${it.s("query")}»" }),
         ToolSpec("read_text", "files", "прочитать текстовый файл до 64 КБ", listOf(a("path", ArgType.STRING, required = true)), "text", sideEffect = false, label = { "Читаю ${it.s("path")}" }),
         ToolSpec("write_text", "files", "создать текстовый файл (папки создаются); существование проверяется внутри",
-            listOf(a("path", ArgType.STRING, required = true), a("text", ArgType.STRING, required = true, maxLength = 65_536), a("overwrite", ArgType.BOOL, "заменить существующий; с подтверждением")),
+            listOf(a("path", ArgType.STRING, required = true), a("text", ArgType.STRING, required = true, maxLength = 65_536), a("overwrite", ArgType.BOOL, "заменить существующий; подтверждение зависит от режима")),
             "status, path, actualName", checks = "Без overwrite существующий файл не меняется; при замене делается резервная копия",
             important = { it.optBoolean("overwrite") }, label = { "Записать ${it.s("path")}" }),
         ToolSpec("append_text", "files", "дописать текст в конец файла (создаёт, если нет)", listOf(a("path", ArgType.STRING, required = true), a("text", ArgType.STRING, required = true, maxLength = 65_536)),

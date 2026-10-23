@@ -128,6 +128,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                 items.put(JSONObject().put("id", id).put("text", text).put("description", description)
                     .put("bounds", JSONArray(listOf(scaledX(rect.left), scaledY(rect.top), scaledX(rect.right), scaledY(rect.bottom))))
                     .put("clickable", node.isClickable).put("editable", node.isEditable).put("scrollable", node.isScrollable).put("enabled", node.isEnabled)
+                    .put("class",node.className).apply { if(Build.VERSION.SDK_INT>=28 && node.isHeading) put("heading",true) }
                     .apply { if (node.isLongClickable) put("longClickable", true) }
                     // A link inside a message is not a node of its own; tapping the message often opens its menu instead.
                     .apply { ScreenLinks.find(text + " " + description).takeIf { it.isNotEmpty() }?.let { put("links", JSONArray(it)) } })
@@ -253,7 +254,14 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
             }
             "tap" -> {
                 pointAtNode(args)
-                if (!click(node(args))) throw UserError("Элемент не поддерживает нажатие. Обновите экран.")
+                val target=node(args)
+                // A WebView label often has no ACTION_CLICK. Clicking a distant clickable ancestor can
+                // activate the site header instead of the result title. Fall back to a finger on THIS label.
+                if (!target.isClickable || !target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    val rect=Rect();target.getBoundsInScreen(rect)
+                    if(!rect.intersect(0,0,physicalWidth,physicalHeight) || rect.isEmpty) throw UserError("Элемент за пределами экрана. Обновите screen.")
+                    gesture(rect.exactCenterX(),rect.exactCenterY(),rect.exactCenterX(),rect.exactCenterY(),80) {graph.agent.awaitAction();node(args)}
+                }
                 visuals?.pulse()
             }
             "long_press" -> {
@@ -374,6 +382,9 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         val path = Path().apply { moveTo(x1, y1); if (moves) lineTo(x2, y2) }
         panel?.temporarilyHide(true)
         try {
+            // Let WindowManager remove the touchable panel before dispatching the finger gesture.
+            delay(64)
+            recheck()
             withTimeout(5000) { suspendCancellableCoroutine<Unit> { continuation ->
                 val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, duration)).build()
                 val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
