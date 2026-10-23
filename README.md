@@ -47,7 +47,7 @@
 
 ---
 
-# Подробное описание · 0.8.1
+# Подробное описание · 0.8.2
 
 Отдельный Android-клиент с чатом и агентом. Kotlin, Jetpack Compose, Material 3.
 Package `dev.luma.agent`, versionCode 15, minSdk 26, target/compileSdk 35.

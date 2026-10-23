@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "dev.luma.agent"
     compileSdk = 35
-    defaultConfig { applicationId = "dev.luma.agent"; minSdk = 26; targetSdk = 35; versionCode = 16; versionName = "0.8.1" }
+    defaultConfig { applicationId = "dev.luma.agent"; minSdk = 26; targetSdk = 35; versionCode = 17; versionName = "0.8.2" }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
