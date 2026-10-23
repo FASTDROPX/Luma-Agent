@@ -17,8 +17,6 @@ class VoiceService: Service() {
     override fun onStartCommand(intent: Intent?,flags: Int,startId: Int): Int {
         if(intent?.action=="stop") {graph.voice.stop();stopSelf();return START_NOT_STICKY}
         val mode=intent?.getStringExtra("mode")?.takeIf {it in setOf("wake","conversation","dictation","read")} ?: run {stopSelf();return START_NOT_STICKY}
-        val manager=getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel("voice","Голос Luma",NotificationManager.IMPORTANCE_LOW).apply {description="Микрофон и разговорный режим";setSound(null,null)})
         try {
             val type=if(mode=="read") ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             if(Build.VERSION.SDK_INT>=29) startForeground(74,notification("Подготовка"),type) else startForeground(74,notification("Подготовка"))
@@ -34,6 +32,7 @@ class VoiceService: Service() {
     }
     override fun onCreate() {
         super.onCreate()
+        getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("voice","Голос Luma",NotificationManager.IMPORTANCE_LOW).apply {description="Микрофон и разговорный режим";setSound(null,null)})
         scope.launch {graph.voice.state.collect {state ->
             if(state.active) getSystemService(NotificationManager::class.java).notify(74,notification(state.phase))
         }}

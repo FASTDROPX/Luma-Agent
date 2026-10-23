@@ -109,6 +109,7 @@ class VoiceController(private val graph: AppGraph) {
                     } finally {withContext(NonCancellable+Dispatchers.IO) {loaded?.close()}}
                 }
             } catch(e: CancellationException) {throw e}
+            catch(e: LinkageError) {graph.uiMessage.value="Голосовой движок несовместим с этим устройством."}
             catch(e: Exception) {graph.uiMessage.value=if(e is UserError) e.message else "Голосовой режим остановлен. Проверьте микрофон, модель и настройки речи."}
             finally {output.stop();state.value=VoiceState();onFinished()}
         }

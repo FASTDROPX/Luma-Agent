@@ -60,12 +60,17 @@ class CloudSpeech internal constructor(private val transport: (suspend (Request)
     private fun checked(response: Response) {
         if(!response.isSuccessful) throw UserError(when(response.code) {401,403->"Речевой API отклонил ключ или доступ.";404->"Речевой API или модель не найдены. Проверьте адрес и имена моделей.";429->"Речевой API исчерпал лимит. Попробуйте позже.";else->"Речевой API: HTTP ${response.code}."})
     }
-    private suspend fun execute(request: Request)=transport?.invoke(request) ?: client.newCall(request).awaitVoice()
+    private suspend fun <T> response(request: Request,read: (Response)->T): T = coroutineScope {
+        val call=client.newCall(request)
+        // Keep cancellation attached until the response body is consumed, not just until headers arrive.
+        val cancelWatch=launch(Dispatchers.IO) {try {awaitCancellation()} finally {call.cancel()}}
+        try {(transport?.invoke(request) ?: call.awaitVoice()).use(read)} finally {cancelWatch.cancel()}
+    }
     suspend fun transcribe(s: VoiceSettings,pcm: ByteArray): String = withContext(Dispatchers.IO) {
         val form=MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("model",s.sttModel)
             .addFormDataPart("language","ru").addFormDataPart("response_format","json")
             .addFormDataPart("file","voice.wav",VoiceWav.encode(pcm).toRequestBody("audio/wav".toMediaType())).build()
-        execute(request(s,"transcriptions").post(form).build()).use {r ->
+        response(request(s,"transcriptions").post(form).build()) {r ->
             checked(r);val bytes=r.body?.byteStream()?.use {it.boundedVoiceBytes(100_000)} ?: byteArrayOf()
             if(bytes.size>100_000) throw UserError("Слишком большой ответ речевого API.")
             try {JSONObject(bytes.toString(Charsets.UTF_8)).optString("text").trim().take(12000)} catch(e: Exception) {throw UserError("Речевой API вернул неверную расшифровку.")}
@@ -73,7 +78,7 @@ class CloudSpeech internal constructor(private val transport: (suspend (Request)
     }
     suspend fun synthesize(s: VoiceSettings,text: String): ByteArray = withContext(Dispatchers.IO) {
         val body=JSONObject().put("model",s.ttsModel).put("input",text).put("voice",s.cloudVoice).put("response_format","mp3").put("speed",s.speed.toDouble())
-        execute(request(s,"speech").post(body.toString().toRequestBody("application/json".toMediaType())).build()).use {r ->
+        response(request(s,"speech").post(body.toString().toRequestBody("application/json".toMediaType())).build()) {r ->
             checked(r);val bytes=r.body?.byteStream()?.use {it.boundedVoiceBytes(16_000_000)} ?: byteArrayOf()
             if(bytes.isEmpty() || bytes.size>16_000_000) throw UserError("Речевой API вернул некорректное аудио.")
             bytes
