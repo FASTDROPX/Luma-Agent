@@ -48,6 +48,8 @@ class AppGraph(val context: Context) {
     private var pendingAgentRequest: String? = null
     init { scope.launch { try { chats.init() } catch (e: Exception) { uiMessage.value = "Не удалось открыть историю чатов." } }; vault.loadError?.let { uiMessage.value = it } }
     fun update(change: (AppSettings) -> AppSettings) { scope.launch { try { vault.update(change) } catch (e: Exception) { uiMessage.value = safeError(e) } } }
+    /** «Чат» / «Агент» for the selected chat (or the next new one). */
+    fun setAgentMode(agent: Boolean) { scope.launch { try { chats.setAgentMode(agent) } catch (e: Exception) { uiMessage.value = safeError(e) } } }
     fun switchProvider(provider: Provider) { cancelCatalog(); update { it.copy(provider = provider) } }
     fun connect(provider: Provider, key: String, endpoint: String) {
         cancelCatalog(); val revision = catalogRevision

@@ -61,7 +61,8 @@ import kotlin.math.roundToInt
     var files by rememberSaveable(selected,stateSaver=Saver<List<Attachment>,String>(save={Attachment.encode(it)},restore={Attachment.decode(it)})) {mutableStateOf(emptyList())}
     var importing by remember {mutableStateOf(false)}
     val wipe=typingWipe(input)
-    var asAgent by rememberSaveable {mutableStateOf(false)}
+    // Stored with the chat, not in this screen: switching tabs or restarting keeps it.
+    val asAgent by graph.chats.agentMode.collectAsStateWithLifecycle()
     var sendTick by remember {mutableIntStateOf(0)}
     var sentPreview by remember {mutableStateOf("")}
     val sending=remember {Animatable(1f)}
@@ -152,7 +153,7 @@ import kotlin.math.roundToInt
             if(messages.isEmpty()) {
                 EmptyChat(Modifier.fillMaxSize(),settings.connection().model.isBlank(),openConnections,orbSlot={slot ->
                     Box(slot.onGloballyPositioned {c->home=c.positionInRoot()+Offset(c.size.width/2f,c.size.height/2f)-origin;homeSize=with(density) {c.size.width.toDp()}})
-                }) {prompt,agent ->asAgent=agent;input=TextFieldValue(prompt,TextRange(prompt.length))}
+                }) {prompt,agent ->graph.setAgentMode(agent);input=TextFieldValue(prompt,TextRange(prompt.length))}
             } else {
                 MotionLazyColumn(Modifier.fillMaxSize().testTag("chat-thread"),state=list,contentPadding=PaddingValues(start=16.dp,end=16.dp,top=12.dp,bottom=22.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
                     // Chat text appears instantly (no fades); a fade-out on the last item could also stay drawn after removal.
@@ -217,8 +218,8 @@ import kotlin.math.roundToInt
             border=BorderStroke(.8.dp,MaterialTheme.colorScheme.outlineVariant.copy(alpha=.35f))) {
             Column(Modifier.padding(horizontal=10.dp,vertical=6.dp).testTag("chat-composer")) {
                 Row(Modifier.padding(start=4.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
-                    FilterChip(!asAgent,{asAgent=false},label={Text("Чат")},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(15.dp))})
-                    FilterChip(asAgent,{asAgent=true},label={Text("Агент")},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(15.dp))})
+                    FilterChip(!asAgent,{graph.setAgentMode(false)},label={Text("Чат")},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(15.dp))})
+                    FilterChip(asAgent,{graph.setAgentMode(true)},label={Text("Агент")},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(15.dp))})
                     Spacer(Modifier.weight(1f))
                     if(asAgent) IconButton(onClick=openAccess) {Icon(Icons.Outlined.Security,"Доступ агента",Modifier.size(20.dp))}
                 }

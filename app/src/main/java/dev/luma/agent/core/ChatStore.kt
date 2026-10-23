@@ -17,18 +17,21 @@ import java.util.Locale
 /** Tokens spent in one chat and across all chats today. */
 data class UsageSummary(val chatInput: Long = 0, val chatOutput: Long = 0, val dayInput: Long = 0, val dayOutput: Long = 0)
 
-class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "conversations.db").path, null, 4) {
+class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "conversations.db").path, null, 5) {
     val attachments=AttachmentStore(context)
     private val mutableConversations = MutableStateFlow<List<Conversation>>(emptyList())
     private val mutableMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     private val mutableSelected = MutableStateFlow<Long?>(null)
     private val mutableUsage = MutableStateFlow(UsageSummary())
+    /** «Чат» or «Агент» of the selected chat; for a new chat, the mode it will be created with. */
+    private val mutableAgent = MutableStateFlow(false)
+    val agentMode = mutableAgent.asStateFlow()
     val conversations = mutableConversations.asStateFlow(); val messages = mutableMessages.asStateFlow(); val selected = mutableSelected.asStateFlow()
     /** Token usage of the selected chat and of today; refreshed after every recorded reply. */
     val usage = mutableUsage.asStateFlow()
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE conversations(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,updated INTEGER NOT NULL,pinned INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE conversations(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,updated INTEGER NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,agent INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE messages(id INTEGER PRIMARY KEY AUTOINCREMENT,chat INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,role TEXT NOT NULL,body TEXT NOT NULL,created INTEGER NOT NULL,attachments TEXT NOT NULL DEFAULT '[]',reasoning TEXT NOT NULL DEFAULT '',meta TEXT NOT NULL DEFAULT '')")
         db.execSQL("CREATE INDEX messages_chat ON messages(chat,id)")
         createUsage(db)
@@ -39,12 +42,24 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
         if(oldVersion<2) db.execSQL("ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'")
         if(oldVersion<3) {db.execSQL("ALTER TABLE messages ADD COLUMN reasoning TEXT NOT NULL DEFAULT ''");db.execSQL("ALTER TABLE messages ADD COLUMN meta TEXT NOT NULL DEFAULT ''")}
         if(oldVersion<4) {db.execSQL("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");createUsage(db)}
+        if(oldVersion<5) db.execSQL("ALTER TABLE conversations ADD COLUMN agent INTEGER NOT NULL DEFAULT 0")
     }
     suspend fun init() = withContext(Dispatchers.IO) { refresh(); refreshUsage() }
-    suspend fun select(id: Long?) = withContext(Dispatchers.IO) { mutableSelected.value = id; reloadMessages(); refreshUsage() }
+    /** A saved chat brings back its own mode; a new chat keeps the mode that was on screen. */
+    suspend fun select(id: Long?) = withContext(Dispatchers.IO) {
+        mutableSelected.value = id
+        if (id != null) mutableAgent.value = readableDatabase.rawQuery("SELECT agent FROM conversations WHERE id=?", arrayOf(id.toString())).use { c -> c.moveToFirst() && c.getInt(0) == 1 }
+        reloadMessages(); refreshUsage()
+    }
+    /** Switches «Чат»/«Агент» at once and stores it with the selected chat, so it survives leaving the screen and restarts. */
+    suspend fun setAgentMode(agent: Boolean) {
+        mutableAgent.value = agent
+        val chat = mutableSelected.value ?: return
+        withContext(Dispatchers.IO) { writableDatabase.update("conversations", ContentValues().apply { put("agent", if (agent) 1 else 0) }, "id=?", arrayOf(chat.toString())); refresh() }
+    }
     suspend fun ensure(title: String): Long = withContext(Dispatchers.IO) {
         mutableSelected.value ?: writableDatabase.insertOrThrow("conversations", null, ContentValues().apply {
-            put("title", title.trim().take(60)); put("updated", System.currentTimeMillis())
+            put("title", title.trim().take(60)); put("updated", System.currentTimeMillis()); put("agent", if (mutableAgent.value) 1 else 0)
         }).also { mutableSelected.value = it; refresh(); reloadMessages(); refreshUsage() }
     }
     /** [reasoning] and [stats] are shown with the answer only; they are never sent back to the model.
@@ -161,7 +176,7 @@ class ChatStore(context: Context) : SQLiteOpenHelper(context, File(context.noBac
     }
     private fun queryConversations(): List<Conversation> {
         val result = mutableListOf<Conversation>()
-        readableDatabase.rawQuery("SELECT id,title,updated,pinned FROM conversations ORDER BY pinned DESC,updated DESC LIMIT 200", null).use { c -> while (c.moveToNext()) result += Conversation(c.getLong(0), c.getString(1), c.getLong(2), c.getInt(3)==1) }
+        readableDatabase.rawQuery("SELECT id,title,updated,pinned,agent FROM conversations ORDER BY pinned DESC,updated DESC LIMIT 200", null).use { c -> while (c.moveToNext()) result += Conversation(c.getLong(0), c.getString(1), c.getLong(2), c.getInt(3)==1, c.getInt(4)==1) }
         return result
     }
     private fun refresh() { mutableConversations.value = queryConversations() }

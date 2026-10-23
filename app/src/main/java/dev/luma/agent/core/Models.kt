@@ -141,7 +141,7 @@ data class Turn(val role: String, val text: String, val image: String? = null, v
     val toolCalls: List<ToolCall> = emptyList(), val toolCallId: String? = null, val toolName: String? = null)
 data class ChatMessage(val id: Long, val role: String, val text: String, val timestamp: Long, val attachments: List<Attachment> = emptyList(),
     val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false)
-data class Conversation(val id: Long, val title: String, val updated: Long, val pinned: Boolean = false)
+data class Conversation(val id: Long, val title: String, val updated: Long, val pinned: Boolean = false, val agent: Boolean = false)
 data class Approval(val title: String, val details: String, val background: Boolean = false)
 data class RunState(val active: Boolean = false, val paused: Boolean = false, val stage: String = "", val step: Int = 0,
     val chatId: Long = 0, val approval: Approval? = null, val error: String? = null, val retryPending: Boolean = false,

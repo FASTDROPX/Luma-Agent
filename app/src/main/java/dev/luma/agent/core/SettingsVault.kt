@@ -86,18 +86,23 @@ class SettingsVault(context: Context) {
 fun validateEndpoint(value: String): String {
     val uri = runCatching { java.net.URI(value.trim()) }.getOrNull() ?: throw UserError("Проверьте адрес сервера.")
     if (uri.host.isNullOrEmpty() || uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) throw UserError("Нужен адрес API без ключа, параметров и логина в URL.")
-    if (uri.scheme != "https" && !(uri.scheme == "http" && isPrivateHost(uri.host))) throw UserError("HTTP разрешён для локальной сети. Для внешнего сервера используйте HTTPS.")
+    if (uri.scheme != "https" && !(uri.scheme == "http" && isPrivateHost(uri.host))) throw UserError("HTTP разрешён для локальной сети и Tailscale. Для сервера в интернете используйте HTTPS.")
     return uri.toASCIIString().trimEnd('/') + "/"
 }
-/** Hosts that may be reached over plain HTTP: this device and the local network only. */
+/**
+ * Hosts that may be reached over plain HTTP: this device, the local network and a Tailscale network
+ * (100.64.0.0/10, *.ts.net, fd7a:… is already a unique-local IPv6 address). Tailscale traffic between the
+ * user's own devices is encrypted by WireGuard, so a home server can be used from another city
+ * without exposing it to the internet.
+ */
 fun isPrivateHost(rawHost: String): Boolean {
     val host = rawHost.lowercase().removeSurrounding("[", "]")
     val octets = host.split('.').map { it.toIntOrNull() }
     val ipv4 = octets.size == 4 && octets.all { it != null && it in 0..255 }
     val localV4 = ipv4 && (octets[0] == 10 || octets[0] == 127 || (octets[0] == 192 && octets[1] == 168) ||
-        (octets[0] == 172 && octets[1] in 16..31) || (octets[0] == 169 && octets[1] == 254))
+        (octets[0] == 172 && octets[1] in 16..31) || (octets[0] == 169 && octets[1] == 254) || (octets[0] == 100 && octets[1] in 64..127))
     // IPv6 loopback, unique local (fc00::/7) and link-local (fe80::/10) literals.
     val localV6 = ':' in host && (host == "::1" || host.startsWith("fc") || host.startsWith("fd") ||
         host.startsWith("fe8") || host.startsWith("fe9") || host.startsWith("fea") || host.startsWith("feb"))
-    return host == "localhost" || host.endsWith(".local") || localV4 || localV6
+    return host == "localhost" || host.endsWith(".local") || host.endsWith(".ts.net") || localV4 || localV6
 }
