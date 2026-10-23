@@ -90,7 +90,6 @@ import kotlin.math.roundToInt
                 item { SoftCard {
                     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {LumaOrb(Modifier.size(96.dp));Column(Modifier.weight(1f)) {Text("Сфера",style=MaterialTheme.typography.titleMedium);Text("Так она выглядит на пустом экране чата.",style=MaterialTheme.typography.bodySmall)}}
                     SettingToggle("Меньше анимаций","Неподвижная сфера и мгновенные переходы",settings.reducedMotion) {v->graph.update {it.copy(reducedMotion=v)}}
-                    SettingToggle("Плавный ввод","Плавное появление букв без задержки клавиатуры",visuals.smoothInput) {v->visual {it.copy(smoothInput=v)}}
                     SettingToggle("Motion blur","Мягкое размытие при прокрутке и смене экранов",visuals.motionBlur) {v->visual {it.copy(motionBlur=v)}}
                     if(visuals.motionBlur) SettingSlider("Сила размытия",visuals.blurStrength,.1f..1f,"${(visuals.blurStrength*100).roundToInt()} %") {v->visual {it.copy(blurStrength=v)}}
                     Text("Эффект работает при движении списков и переходах Luma. На Android 8–11 используется многослойное размытие. «Меньше анимаций» отключает движение и размытие.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)

@@ -39,3 +39,20 @@ object Gestures {
         else Stroke(clampX(start), clampY(h / 2), clampX(end), clampY(h / 2), if (from != null) 250 else 350)
     }
 }
+
+/**
+ * How the agent «types» into a field: growing prefixes of the final text, cut only between whole characters
+ * (emoji and accented letters stay intact), at most [maxSteps] of them. The last one is always the full text,
+ * so the field ends up exactly as one ACTION_SET_TEXT would leave it.
+ */
+object TypingPlan {
+    fun prefixes(text: String, maxSteps: Int = 40): List<String> {
+        if (text.isEmpty()) return listOf("")
+        val iterator = java.text.BreakIterator.getCharacterInstance().apply { setText(text) }
+        val ends = generateSequence(iterator.first()) { iterator.next().takeIf { it != java.text.BreakIterator.DONE } }.drop(1).toList()
+        val steps = ends.size.coerceAtMost(maxSteps.coerceAtLeast(1))
+        return (1..steps).map { i -> text.substring(0, ends[((ends.size * i + steps - 1) / steps - 1).coerceIn(0, ends.size - 1)]) }.distinct()
+    }
+    /** About 45 ms per character, but the whole text takes 0.3–1.6 s however long it is. */
+    fun stepMillis(characters: Int, steps: Int): Long = ((characters * 45L).coerceIn(300, 1600) / steps.coerceAtLeast(1)).coerceAtLeast(16)
+}

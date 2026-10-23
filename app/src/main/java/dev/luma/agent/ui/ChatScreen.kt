@@ -60,7 +60,6 @@ import kotlin.math.roundToInt
     var input by rememberSaveable(selected,stateSaver=TextFieldValue.Saver) {mutableStateOf(TextFieldValue(""))}
     var files by rememberSaveable(selected,stateSaver=Saver<List<Attachment>,String>(save={Attachment.encode(it)},restore={Attachment.decode(it)})) {mutableStateOf(emptyList())}
     var importing by remember {mutableStateOf(false)}
-    val wipe=typingWipe(input)
     // Stored with the chat, not in this screen: switching tabs or restarting keeps it.
     val asAgent by graph.chats.agentMode.collectAsStateWithLifecycle()
     var sendTick by remember {mutableIntStateOf(0)}
@@ -231,9 +230,9 @@ import kotlin.math.roundToInt
                 Row(Modifier.fillMaxWidth().padding(vertical=2.dp),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.Bottom) {
                     IconButton(onClick={picker.launch(arrayOf("*/*"))},enabled=!busy && !run.active && !importing && files.size<4,modifier=Modifier.size(44.dp).testTag("chat-attach")) {Icon(Icons.Outlined.Add,"Прикрепить файлы",Modifier.size(24.dp))}
                     BasicTextField(input,{if(it.text.length<=12_000) input=it else graph.uiMessage.value="Сократите сообщение до 12 000 символов."},
-                        Modifier.weight(1f).heightIn(min=44.dp).padding(vertical=11.dp).then(wipe.modifier).testTag("chat-input"),
+                        Modifier.weight(1f).heightIn(min=44.dp).padding(vertical=11.dp).testTag("chat-input"),
                         textStyle=MaterialTheme.typography.bodyLarge.copy(color=MaterialTheme.colorScheme.onSurface),maxLines=4,
-                        visualTransformation=smoothInput(input),onTextLayout={wipe.layout=it},cursorBrush=SolidColor(MaterialTheme.colorScheme.primary),decorationBox={field ->
+                        cursorBrush=SolidColor(MaterialTheme.colorScheme.primary),decorationBox={field ->
                             Box {if(input.text.isEmpty()) Text(if(asAgent) "Какую задачу выполнить?" else t("Напиши сообщение…"),style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f),maxLines=1,overflow=TextOverflow.Ellipsis);field()}
                         })
                     GradientActionButton(busy || run.active,!importing && (input.text.isNotBlank() || files.isNotEmpty()),sendTick,::submit,diameter=44.dp)

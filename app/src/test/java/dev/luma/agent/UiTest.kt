@@ -355,8 +355,7 @@ class UiTest {
         var transform: androidx.compose.ui.text.input.VisualTransformation=androidx.compose.ui.text.input.VisualTransformation.None
         compose.setContent {LumaTheme(AppSettings(reducedMotion=false,dynamicColors=false)) {
             val effect=smoothInput(input.value);SideEffect {transform=effect}
-            val wipe=typingWipe(input.value)
-            androidx.compose.foundation.text.BasicTextField(input.value,{input.value=it},Modifier.fillMaxWidth().heightIn(min=52.dp).then(wipe.modifier).testTag("animated-input"),visualTransformation=effect,onTextLayout={wipe.layout=it})
+            androidx.compose.foundation.text.BasicTextField(input.value,{input.value=it},Modifier.fillMaxWidth().heightIn(min=52.dp).testTag("animated-input"),visualTransformation=effect)
         }}
         compose.onNodeWithTag("animated-input").performTextInputSelection(androidx.compose.ui.text.TextRange(1))
         compose.onNodeWithTag("animated-input").performTextInput("🌙")
