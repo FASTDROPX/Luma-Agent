@@ -106,6 +106,17 @@ class WorkspaceFilesTest {
         } finally { agent.close() }
     }
 
+    @Test fun fullAccessDeletesAnOwnedFileWithoutAnyLumaApproval() {
+        val file=File(TestDocumentsProvider.root,"remove-me.txt").apply {writeText("temporary test file")}
+        val agent=AgentRun(context,configure={it.copy(confirmActions=false,folder=folder)}) {i,_ ->
+            if(i==0) Replies.openAiCall("delete_file",JSONObject().put("path","remove-me.txt")) else Replies.openAiText("Удалил файл.")
+        }
+        try {
+            agent.run("Удали remove-me.txt") {throw AssertionError("Полный доступ не должен спрашивать подтверждение")}
+            assertFalse(file.exists());assertEquals("Удалил файл.",agent.chats.messages.value.last().text)
+        } finally {agent.close()}
+    }
+
     @Test fun missingFolderShowsACardAndCanBeSkippedWithoutOpeningTheScreen() {
         for (missing in listOf("", "content://dev.luma.missing/tree/primary%3AX")) {
             var card = false
