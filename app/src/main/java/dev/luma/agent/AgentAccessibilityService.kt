@@ -284,7 +284,6 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         val pause = dev.luma.agent.core.TypingPlan.stepMillis(text.length, steps.size)
         visuals?.beginTyping(caretOf(node, 0))
         try {
-            var shown = ""
             for (prefix in steps) {
                 graph.agent.awaitAction(); unlocked()
                 if (!node.refresh() || !node.isEditable) throw ToolFailure(ToolStatus.UNKNOWN, "Поле ввода исчезло во время ввода. Проверьте screen, не повторяя ввод.")
@@ -293,7 +292,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                 // Give the field one frame to lay out the new letters, then move the caret, then finish the pause.
                 val settle = minOf(pause, 24L)
                 delay(settle)
-                visuals?.updateTyping(caretOf(node, prefix.length), prefix.removePrefix(shown)); shown = prefix
+                visuals?.updateTyping(caretOf(node, prefix.length))
                 delay(pause - settle)
             }
         } finally { visuals?.endTyping() }
@@ -313,14 +312,16 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                 putInt(AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_ARG_START_INDEX, length - count)
                 putInt(AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_ARG_LENGTH, count)
             }
+            // One entry per requested character; letters scrolled out of view come back empty and stay as gaps.
             val boxes = runCatching {
                 if (node.refreshWithExtraData(AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY, request))
-                    node.extras.getParcelableArray(AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY)?.mapNotNull { it as? android.graphics.RectF }
+                    node.extras.getParcelableArray(AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY)?.map { it as? android.graphics.RectF }
                 else null
-            }.getOrNull().orEmpty().filter { it.width() >= 0f && it.height() > 0f && it.centerX() >= field.left - 1 && it.centerX() <= field.right + 1 }
-            if (boxes.isNotEmpty()) {
-                val last = boxes.last()
-                return TypingCaret(last.right + 1.5f * density, last.centerY(), last.height() * 1.15f, FloatArray(boxes.size * 2) { if (it % 2 == 0) boxes[it / 2].centerX() else boxes[it / 2].centerY() })
+            }.getOrNull().orEmpty().map { box -> box?.takeIf { it.width() >= 0f && it.height() > 0f && it.centerX() >= field.left - 1 && it.centerX() <= field.right + 1 } }
+            val last = boxes.lastOrNull { it != null }
+            if (last != null && boxes.size == count) {
+                val letters = FloatArray(count * 2) { val box = boxes[it / 2]; if (box == null) Float.NaN else if (it % 2 == 0) box.centerX() else box.centerY() }
+                return TypingCaret(last.right + 1.5f * density, last.centerY(), last.height() * 1.15f, letters, length)
             }
         }
         // Estimate: about 0.55 em per character at 16 sp, kept inside the field like a scrolled one-line input.
@@ -328,8 +329,12 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         val inset = 12 * density
         val x = (field.left + inset + length * step).coerceAtMost(field.right - inset).coerceAtLeast(field.left + inset)
         val y = field.exactCenterY(); val height = minOf(field.height() * .55f, 24 * density)
-        val shown = (0 until count).map { x - (it + .5f) * step }.filter { it >= field.left + inset }.reversed()
-        return TypingCaret(x, y, height, FloatArray(shown.size * 2) { if (it % 2 == 0) shown[it / 2] else y })
+        // Letter i of the last [count] sits (count - i - 0.5) steps left of the caret; hidden ones stay as gaps.
+        val letters = FloatArray(count * 2) {
+            val letterX = x - (count - it / 2 - .5f) * step
+            if (letterX < field.left + inset) Float.NaN else if (it % 2 == 0) letterX else y
+        }
+        return TypingCaret(x, y, height, letters, length)
     }
     private fun insideKnownNode(point: Pair<Float, Float>): Boolean {
         val rect = Rect()

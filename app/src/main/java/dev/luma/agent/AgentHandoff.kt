@@ -27,15 +27,20 @@ internal class CursorParticleField(seeds: List<CursorSeed>,x: Float,y: Float,rad
     private var headingX=1f;private var headingY=0f
     private val trail=ArrayDeque<FloatArray>()
     /**
-     * Typing: 0 = orbits around the cursor, 1 = particles sit on the letters just typed. [letters] holds screen
-     * positions (x0,y0,x1,y1,…, oldest first) of the last visible letters; when a one-line field scrolls, those
-     * positions slide left and the particles follow them, so they never pile up at a caret that stays put.
+     * Typing (0..1): the cloud gets smaller and flatter around the caret. Particles always chase the cursor and, while
+     * the text grows, trail behind it without catching up. In a full one-line field the caret stays put and the text
+     * scrolls; [carry] moves the particles with the letters, so they keep chasing instead of piling up on the caret.
      */
     var typing=0f
-    /** 1 from the moment typing starts: a short stream, so particles keep up with the caret's flight into the field. */
+    /** 1 during the caret's flight into the field: a short stream that flies along with the caret. */
     var tight=0f
-    var letters=FloatArray(0)
-    var lineHeight=0f
+    /** Moves the particles and the recent cursor path by the distance the text just scrolled. */
+    fun carry(dx: Float,dy: Float) {
+        if(!dx.isFinite() || !dy.isFinite()) return
+        for(p in particles) {p.x+=dx;p.y+=dy}
+        for(point in trail) {point[1]+=dx;point[2]+=dy}
+        lastX+=dx;lastY+=dy
+    }
     init {
         val startX=x;val startY=y
         val chosen=seeds.take(64)
@@ -84,21 +89,19 @@ internal class CursorParticleField(seeds: List<CursorSeed>,x: Float,y: Float,rad
             swirl+=h*7.0*excite*(1f-motion)
             val spread=1f-.82f*motion
             for(p in particles) {
-                // While typing the stream is shorter: particles keep up with the caret's flight into the field.
-                val (px,py)=pathAt(time-p.lag*motion*(1f-.75f*tight),ax,ay)
+                // During the caret's flight the stream is shorter, so the particles fly along with it; while typing it is
+                // half as long: a short tail right behind the caret.
+                val (px,py)=pathAt(time-p.lag*motion*(1f-.75f*tight)*(1f-.5f*typing),ax,ay)
                 // A gentle sideways bow makes the stream curve like the welcome-screen arrival.
                 val bow=sin(PI.toFloat()*p.lag/.33f)*radius*.9f*motion*p.bend
                 val cx=px-headingY*bow;val cy=py+headingX*bow
                 val a=time*(.55+p.seed.shade*.65)+swirl*(.7+.6*p.seed.shade)
                 val c=cos(a).toFloat();val s=sin(a).toFloat()
-                val r=radius*(1.35f+p.seed.shade*.30f)*spread
-                var tx=cx+r*(p.ux*c+p.vx*s);var ty=cy+r*(p.uy*c+p.vy*s);var tz=r*(p.uz*c+p.vz*s)
-                if(typing>0f) {
-                    val (lx,ly,lz)=letterTarget(p,x,y,radius)
-                    tx+=(lx-tx)*typing;ty+=(ly-ty)*typing;tz+=(lz-tz)*typing
-                }
-                val omega=11f+p.seed.shade*4f
-                // While typing, damping works against the cursor's own velocity: the cloud flies with the caret
+                val r=radius*(1.35f+p.seed.shade*.30f)*spread*(1f-.4f*typing)
+                val tx=cx+r*(p.ux*c+p.vx*s);val ty=cy+r*(p.uy*c+p.vy*s)*(1f-.35f*typing);val tz=r*(p.uz*c+p.vz*s)
+                // A little firmer while typing: the tail stays close behind the caret even when a field scrolls fast.
+                val omega=(11f+p.seed.shade*4f)*(1f+.4f*typing)
+                // During that flight damping works against the cursor's own velocity: the cloud flies with the caret
                 // instead of trailing far behind it at speed.
                 p.dx=(p.dx+((tx-p.x)*omega*omega-1.8f*omega*(p.dx-velocityX*tight))*h).coerceIn(-15000f,15000f)
                 p.dy=(p.dy+((ty-p.y)*omega*omega-1.8f*omega*(p.dy-velocityY*tight))*h).coerceIn(-15000f,15000f)
@@ -108,25 +111,5 @@ internal class CursorParticleField(seeds: List<CursorSeed>,x: Float,y: Float,rad
         }
         lastX=x;lastY=y
         while(trail.size>2 && trail.first()[0]<time-.6) trail.removeFirst()
-    }
-    /**
-     * Where a particle rests while typing: on one of the recent letters (the caret [x],[y] counts as the newest),
-     * hovering a little above or below the line. Particles that stay close to the caret take the newest letters.
-     */
-    internal fun letterTarget(p: Particle,x: Float,y: Float,radius: Float): Triple<Float,Float,Float> {
-        val count=letters.size/2
-        val order=((p.lag-.025f)/.30f).coerceIn(0f,1f)
-        // Positions along the text, newest last; the caret closes the chain.
-        val slots=count+1
-        val k=(1f-order)*(slots-1)
-        val i=floor(k).toInt().coerceIn(0,slots-1);val j=(i+1).coerceAtMost(slots-1);val f=k-i
-        fun px(n: Int)=if(n>=count) x else letters[n*2]
-        fun py(n: Int)=if(n>=count) y else letters[n*2+1]
-        val bx=px(i)+(px(j)-px(i))*f;val by=py(i)+(py(j)-py(i))*f
-        val h=(if(lineHeight>0f) lineHeight else radius*1.4f)
-        val phase=time*(1.1+p.seed.shade*1.3)+p.bend*3.0
-        val ox=(cos(phase*.7).toFloat()*.18f)*h
-        val oy=(sin(phase).toFloat()*(.35f+.3f*p.seed.shade))*h
-        return Triple(bx+ox,by+oy,cos(phase).toFloat()*radius)
     }
 }

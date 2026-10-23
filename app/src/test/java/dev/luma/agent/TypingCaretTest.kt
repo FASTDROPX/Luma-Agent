@@ -58,19 +58,20 @@ class TypingCaretTest {
         assertTrue(flow > .1f)
         frames(1000); assertTrue(view.caretFlow < .05f)
 
-        // While travelling the caret stretches ahead, toward the new letter, not behind.
-        view.typeAt(TypingCaret(200f, 300f, 22f, floatArrayOf(120f, 300f, 160f, 300f)), "a")
+        val restHeight = run { view.draw(Canvas(Bitmap.createBitmap(411, 891, Bitmap.Config.ARGB_8888))); view.caretBox.height() }
+        val restWidth = view.caretBox.width()
+        assertEquals(22f, restHeight, .5f)
+
+        // While travelling the caret stretches ahead, toward the new letter, and only in width: its height stays.
+        view.typeAt(TypingCaret(200f, 300f, 22f))
         repeat(3) { frame() }
         val moving = Bitmap.createBitmap(411, 891, Bitmap.Config.ARGB_8888); view.draw(Canvas(moving))
         val at = view.cursor.x.toInt()
         assertTrue(android.graphics.Color.alpha(moving.getPixel(at + 4, 300)) > 200)
         assertTrue(android.graphics.Color.alpha(moving.getPixel(at - 5, 300)) < 120)
-        frames(1000)
-        // A space makes the caret hop into a drop and come back.
-        view.typeAt(TypingCaret(160f, 300f, 22f, floatArrayOf(110f, 300f, 120f, 300f)), " ")
-        frames(128); assertTrue(view.hop > .5f)
-        frames(300); assertEquals(0f, view.hop)
-        frames(600)
+        assertEquals(restHeight, view.caretBox.height(), .01f)
+        assertTrue(view.caretBox.width() > restWidth + 3f)
+        view.typeAt(TypingCaret(160f, 300f, 22f)); frames(1000)
 
         val bitmap = Bitmap.createBitmap(411, 891, Bitmap.Config.ARGB_8888); view.draw(Canvas(bitmap))
         assertTrue(android.graphics.Color.alpha(bitmap.getPixel(160, 300)) > 150)
@@ -82,25 +83,44 @@ class TypingCaretTest {
         view.dispose(); app.graph.scope.cancel()
     }
 
-    @Test fun particlesSitOnTheLettersAndFollowThemWhenTheLineScrolls() {
-        val seeds = dev.luma.agent.ui.OrbPhysics(56).particles.map { CursorSeed(it.x, it.y, it.z, it.size, it.shade) }
-        val field = CursorParticleField(seeds, 300f, 400f, 14f)
-        fun letters(shift: Float) = FloatArray(40) { if (it % 2 == 0) 100f + it / 2 * 10f - shift else 400f }
-        field.typing = 1f; field.lineHeight = 20f; field.letters = letters(0f)
-        repeat(90) { field.advance(1 / 60f, 300f, 400f, 14f) }
-        val xs = field.particles.map { it.x }
-        // Spread along the text, not crowded at the caret (x = 300).
-        assertTrue(xs.min() < 150f); assertTrue(xs.count { abs(it - 300f) < 20f } < field.particles.size / 3)
-        assertTrue(field.particles.all { abs(it.y - 400f) < 20f })
+    @Test fun particlesChaseTheCaretAndTrailBehindItWhileTypingAlsoInAScrollingField() {
+        val app = ApplicationProvider.getApplicationContext<LumaApp>()
+        val view = AgentCanvas(app); view.configure(RunState(active = true), AppSettings())
+        view.layout(0, 0, 411, 891)
+        val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+        fun frame() { looper.idleFor(java.time.Duration.ofMillis(16)); view.advanceVisualFrame(android.os.SystemClock.uptimeMillis()) }
+        fun frames(ms: Int) = repeat(ms / 16) { frame() }
+        view.advanceVisualFrame(android.os.SystemClock.uptimeMillis()); frames(1200)
+        // Letters 9 px wide from x = 40; a one-line field shows up to x = 370 and then scrolls.
+        fun caret(n: Int, scroll: Float = 0f): TypingCaret {
+            val count = minOf(n, 24)
+            val letters = FloatArray(count * 2) { val i = n - count + it / 2; if (it % 2 == 0) 40f + 9f * i + 4.5f - scroll else 300f }
+            return TypingCaret(40f + 9f * n - scroll + 1.5f, 300f, 22f, letters, n)
+        }
+        fun xs() = view.particleField!!.particles.map { it.x }
+        fun spread(caretX: Float) = xs().map { abs(it - caretX) }
+        view.typeAt(caret(0)); frames(500)
 
-        // A one-line field scrolls: the letters slide 40 px left while the caret stays. Particles follow smoothly.
-        val before = field.particles.map { it.x }.average()
-        field.letters = letters(40f)
-        field.advance(1 / 60f, 300f, 400f, 14f)
-        val firstStep = before - field.particles.map { it.x }.average()
-        assertTrue(firstStep in 0.0..10.0)
-        repeat(90) { field.advance(1 / 60f, 300f, 400f, 14f) }
-        val moved = before - field.particles.map { it.x }.average()
-        assertTrue("moved $moved", moved in 25.0..45.0)
+        // A normal field: the caret moves on; the particles chase it and trail behind, never spread over the text.
+        var n = 0
+        repeat(30) { n++; view.typeAt(caret(n)); frames(48) }
+        val caretX = view.cursor.x
+        assertTrue(xs().average() < caretX - 4f)
+        assertTrue(xs().min() > caretX - 150f)
+        frames(900)
+        assertTrue(spread(view.cursor.x).average() < 22.0) // typing stopped: they catch up with the caret
+
+        // A full one-line field: the caret stays at the right edge while the text scrolls left under it. The particles
+        // are carried back with the letters and keep chasing, so they trail behind instead of piling up on the caret.
+        val edge = caret(n).x
+        var scroll = 0f
+        val trailing = mutableListOf<Double>()
+        repeat(30) { n++; scroll += 9f; view.typeAt(caret(n, scroll)); frames(48); trailing += edge - xs().average() }
+        assertEquals(edge, view.cursor.x, 1f)
+        assertTrue("trail ${trailing.takeLast(10)}", trailing.takeLast(10).all { it > 6.0 })
+        assertTrue(xs().min() > edge - 160f)
+        frames(900)
+        assertTrue(spread(edge).average() < 22.0)
+        view.dispose(); app.graph.scope.cancel()
     }
 }
