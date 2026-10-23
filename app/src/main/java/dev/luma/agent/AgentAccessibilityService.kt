@@ -12,7 +12,13 @@ import android.os.Bundle
 import android.util.Base64
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import dev.luma.agent.core.BlockedWords
+import dev.luma.agent.core.Gestures
+import dev.luma.agent.core.ScreenDriver
+import dev.luma.agent.core.ScreenResult
+import dev.luma.agent.core.ToolFailure
+import dev.luma.agent.core.ToolStatus
 import dev.luma.agent.core.UserError
 import dev.luma.agent.core.requiredInt
 import dev.luma.agent.core.requiredString
@@ -33,8 +39,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.roundToInt
 
-internal data class ScreenResult(val json: JSONObject, val image: String? = null)
-class AgentAccessibilityService : AccessibilityService() {
+class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
     companion object {
         @Volatile var instance: AgentAccessibilityService? = null; private set
         val connected = MutableStateFlow(false)
@@ -70,7 +75,7 @@ class AgentAccessibilityService : AccessibilityService() {
         if (getSystemService(KeyguardManager::class.java).isKeyguardLocked) throw UserError("Разблокируйте телефон вручную, затем запустите задачу снова.")
     }
     @Suppress("DEPRECATION")
-    internal suspend fun observe(withImage: Boolean): ScreenResult = withContext(Dispatchers.Main.immediate) {
+    override suspend fun observe(withImage: Boolean): ScreenResult = withContext(Dispatchers.Main.immediate) {
         unlocked(); clearNodes()
         val metrics = android.util.DisplayMetrics()
         (getSystemService(WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.getRealMetrics(metrics)
@@ -148,7 +153,7 @@ class AgentAccessibilityService : AccessibilityService() {
         if (!cached.info.refresh() || !cached.info.isVisibleToUser || !cached.info.isEnabled || cached.info.isPassword || signature(cached.info) != cached.signature) throw UserError("Элемент изменился или недоступен. Обновите screen.")
         return cached.info
     }
-    internal fun actionLabel(name: String, args: JSONObject): String {
+    override fun actionLabel(name: String, args: JSONObject): String {
         val target = args.optInt("node")
         val label = nodes[target]?.info?.let { it.text?.toString()?.takeIf(String::isNotBlank) ?: it.contentDescription?.toString() }.orEmpty().take(100)
         return when (name) {
@@ -157,6 +162,7 @@ class AgentAccessibilityService : AccessibilityService() {
             "tap_point" -> textAtPoint(args)?.let { "Нажать: ${it.take(100)} (точка ${args.optInt("x")}, ${args.optInt("y")})" }
                 ?: "Нажать точку ${args.optInt("x")}, ${args.optInt("y")}"
             "scroll", "swipe" -> "Прокрутить экран"
+            "swipe_screen", "open_notifications", "open_quick_settings", "global_action" -> dev.luma.agent.core.ToolRegistry.label(name, args)
             "open_app" -> "Открыть ${args.optString("package")}"
             "back" -> "Вернуться назад"
             "home" -> "Открыть главный экран"
@@ -174,15 +180,61 @@ class AgentAccessibilityService : AccessibilityService() {
         }.minByOrNull { it.second }?.first
     }
     /** Returns why a step needs the user's confirmation, or null. Words come only from the user's own list. */
-    internal fun sensitive(name: String, args: JSONObject, blockedWords: String): String? {
+    override fun sensitive(name: String, args: JSONObject, blockedWords: String): String? {
         if (name !in setOf("tap", "tap_point", "set_text")) return null
-        if (snapshotPackage.contains("permissioncontroller") || snapshotPackage.contains("packageinstaller")) return "Системный экран разрешений Android."
+        if (permissionScreen(snapshotPackage)) return "Системный экран разрешений Android."
         return BlockedWords.match(blockedWords, actionLabel(name, args))?.let { "Совпало запрещённое слово «$it»." }
     }
-    internal suspend fun execute(name: String, args: JSONObject): JSONObject = withContext(Dispatchers.Main.immediate) {
-        unlocked();graph.agent.awaitAction()
-        if (name in setOf("tap", "tap_point", "set_text", "swipe") && (snapshotPackage.contains("permissioncontroller") || snapshotPackage.contains("packageinstaller"))) throw UserError("Системное разрешение нужно подтвердить вручную в Android.")
+    private fun permissionScreen(pkg: String) = pkg.contains("permissioncontroller") || pkg.contains("packageinstaller")
+    private fun currentPackage(): String { val root = rootInActiveWindow; return root?.packageName?.toString().orEmpty().also { root?.recycle() } }
+    @Suppress("DEPRECATION")
+    private fun realSize(): Pair<Int, Int> { val m = android.util.DisplayMetrics(); (getSystemService(WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.getRealMetrics(m); return m.widthPixels to m.heightPixels }
+    /** The expanded shade or quick settings: a large System UI window, not just the status bar. */
+    private fun systemPanelShown(): Boolean = runCatching {
+        val (_, height) = realSize(); val rect = Rect()
+        windows.any { window ->
+            window.getBoundsInScreen(rect)
+            val root = window.root; val pkg = root?.packageName?.toString().orEmpty(); root?.recycle()
+            window.type == AccessibilityWindowInfo.TYPE_SYSTEM && pkg.contains("systemui") && rect.height() > height * 0.4
+        }
+    }.getOrDefault(false)
+    private suspend fun global(action: Int, fraction: Float, what: String, verify: (suspend () -> Boolean?)? = null): JSONObject {
+        visualGlobal(fraction)
+        if (!performGlobalAction(action)) throw ToolFailure(ToolStatus.ERROR, "Android не выполнил действие «$what».")
+        visuals?.pulse()
+        val verified = verify?.let { check -> var value: Boolean? = null; repeat(6) { if (value != true) { delay(200); value = check() } }; value }
+        return JSONObject().put("status", ToolStatus.DONE).put("verified", verified == true).apply { if (verify != null && verified != true) put("message", "Android принял действие, но проверить результат не удалось.") }
+    }
+    override suspend fun execute(name: String, args: JSONObject): JSONObject = withContext(Dispatchers.Main.immediate) {
+        if (!(name == "global_action" && args.optString("action") == "lock_screen")) unlocked()
+        graph.agent.awaitAction()
+        if (name in setOf("tap", "tap_point", "set_text", "swipe") && permissionScreen(snapshotPackage)) throw ToolFailure(ToolStatus.DENIED, "Системное разрешение нужно подтвердить вручную в Android.")
+        if (name == "swipe_screen" && permissionScreen(currentPackage())) throw ToolFailure(ToolStatus.DENIED, "На экране системного разрешения жесты агента запрещены. Подтвердите или отклоните его вручную.")
         when (name) {
+            "open_notifications" -> return@withContext global(GLOBAL_ACTION_NOTIFICATIONS, .5f, "шторка уведомлений") { systemPanelShown() }
+            "open_quick_settings" -> return@withContext global(GLOBAL_ACTION_QUICK_SETTINGS, .5f, "быстрые настройки") { systemPanelShown() }
+            "global_action" -> return@withContext when (val action = args.getString("action")) {
+                "recents" -> global(GLOBAL_ACTION_RECENTS, .88f, "недавние приложения")
+                "power_dialog" -> global(GLOBAL_ACTION_POWER_DIALOG, .5f, "меню питания")
+                "lock_screen" -> if (Build.VERSION.SDK_INT >= 28) global(GLOBAL_ACTION_LOCK_SCREEN, .5f, "блокировка") {
+                        getSystemService(KeyguardManager::class.java).isKeyguardLocked || !getSystemService(android.os.PowerManager::class.java).isInteractive }
+                    else throw ToolFailure(ToolStatus.UNSUPPORTED, "Блокировка экрана службой доступна на Android 9+.")
+                "screenshot" -> if (Build.VERSION.SDK_INT >= 28) global(GLOBAL_ACTION_TAKE_SCREENSHOT, .5f, "снимок экрана").put("message", "Снимок сохраняет система в галерею; Luma его не получает.")
+                    else throw ToolFailure(ToolStatus.UNSUPPORTED, "Снимок экрана службой доступен на Android 9+.")
+                "close_shade" -> if (Build.VERSION.SDK_INT >= 31) global(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE, .5f, "закрыть шторку") { !systemPanelShown() }
+                    else global(GLOBAL_ACTION_BACK, .12f, "назад") { !systemPanelShown() }
+                "all_apps" -> if (Build.VERSION.SDK_INT >= 31) global(GLOBAL_ACTION_ACCESSIBILITY_ALL_APPS, .5f, "все приложения")
+                    else throw ToolFailure(ToolStatus.UNSUPPORTED, "Список всех приложений через службу доступен на Android 12+.")
+                else -> throw ToolFailure(ToolStatus.ERROR, "Неизвестное системное действие $action.")
+            }
+            "swipe_screen" -> {
+                val (width, height) = realSize()
+                val stroke = Gestures.standard(args.getString("direction"), args.optString("edge"), args.optString("length"), width, height)
+                gesture(stroke.x1, stroke.y1, stroke.x2, stroke.y2, stroke.durationMs) { graph.agent.awaitAction(); unlocked() }
+                delay(350); return@withContext JSONObject().put("status", ToolStatus.DONE).put("verified", false)
+                    .put("gesture", JSONObject().put("from", JSONArray(listOf(stroke.x1.roundToInt(), stroke.y1.roundToInt()))).put("to", JSONArray(listOf(stroke.x2.roundToInt(), stroke.y2.roundToInt()))))
+                    .put("next", "Результат жеста виден в приложенном screen.")
+            }
             "tap" -> {
                 pointAtNode(args)
                 if (!click(node(args))) throw UserError("Элемент не поддерживает нажатие. Обновите экран.")
@@ -202,39 +254,49 @@ class AgentAccessibilityService : AccessibilityService() {
                 if (!node.isScrollable || !node.performAction(action)) throw UserError("Элемент не прокручивается в эту сторону.")
             }
             "tap_point", "swipe" -> {
-                validateSnapshot(args); if (!hasImage) throw UserError("Для координат нужен текущий снимок экрана.")
+                validateSnapshot(args)
                 fun point(x: String, y: String): Pair<Float, Float> {
                     val px = args.requiredInt(x); val py = args.requiredInt(y)
                     return physicalPoint(px,py,imageWidth,imageHeight,physicalWidth,physicalHeight)
                 }
                 val start = if (name == "tap_point") point("x", "y") else point("x1", "y1")
                 val end=if(name=="swipe") point("x2","y2") else start
-                visuals?.travelTo(start.first,start.second)
-                visuals?.prepareGesture(start.first,start.second,end.first,end.second)
-                graph.agent.awaitAction();validateSnapshot(args)
-                val path=Path().apply {moveTo(start.first,start.second);if(name=="swipe") lineTo(end.first,end.second)}
-                panel?.temporarilyHide(true)
-                try {
-                withTimeout(5000) { suspendCancellableCoroutine<Unit> { continuation ->
-                    val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, if (name == "swipe") 420 else 80)).build()
-                    val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
-                        override fun onCompleted(gestureDescription: GestureDescription?) { if (continuation.isActive) continuation.resume(Unit) }
-                        override fun onCancelled(gestureDescription: GestureDescription?) { if (continuation.isActive) continuation.resumeWithException(UserError("Жест отменён Android.")) }
-                    }, null)
-                    if(accepted) {visuals?.pulse();if(name=="swipe") visuals?.traceTo(end.first,end.second)}
-                    if (!accepted && continuation.isActive) continuation.resumeWithException(UserError("Android не принял жест."))
-                } }
-                } catch (e: TimeoutCancellationException) {
-                    // A stuck gesture is a failed step, not the end of the whole task.
-                    currentCoroutineContext().ensureActive()
-                    throw UserError("Android не подтвердил жест за 5 секунд. Обновите screen и проверьте результат.")
-                } finally {panel?.temporarilyHide(false)}
+                // Without a picture the model knows only the element tree: a tap must land on a listed element, never a guessed spot.
+                if (name == "tap_point" && !hasImage && !insideKnownNode(start)) throw ToolFailure(ToolStatus.ERROR, "Точка не попадает ни в один элемент последнего screen. Используйте tap по node; координаты без снимка допустимы только внутри элементов.")
+                gesture(start.first, start.second, end.first, end.second, if (name == "swipe") 420 else 80) { graph.agent.awaitAction(); validateSnapshot(args) }
             }
             "back" -> { visualGlobal(.12f);if (!performGlobalAction(GLOBAL_ACTION_BACK)) throw UserError("Не удалось вернуться назад.");visuals?.pulse() }
             "home" -> { visualGlobal(.5f);if (!performGlobalAction(GLOBAL_ACTION_HOME)) throw UserError("Не удалось открыть главный экран.");visuals?.pulse() }
             else -> throw UserError("Неизвестное действие экрана.")
         }
-        delay(450); JSONObject().put("ok", true).put("next", "Проверьте результат через screen")
+        delay(450); JSONObject().put("status", ToolStatus.DONE).put("ok", true).put("next", "Результат виден в приложенном screen")
+    }
+    private fun insideKnownNode(point: Pair<Float, Float>): Boolean {
+        val rect = Rect()
+        return nodes.values.any { node -> node.info.getBoundsInScreen(rect); rect.contains(point.first.toInt(), point.second.toInt()) }
+    }
+    /** One stroke; [recheck] runs after the cursor animation, right before the gesture is injected. */
+    private suspend fun gesture(x1: Float, y1: Float, x2: Float, y2: Float, duration: Long, recheck: suspend () -> Unit) {
+        visuals?.travelTo(x1, y1); visuals?.prepareGesture(x1, y1, x2, y2)
+        recheck()
+        val moves = x1 != x2 || y1 != y2
+        val path = Path().apply { moveTo(x1, y1); if (moves) lineTo(x2, y2) }
+        panel?.temporarilyHide(true)
+        try {
+            withTimeout(5000) { suspendCancellableCoroutine<Unit> { continuation ->
+                val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, duration)).build()
+                val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) { if (continuation.isActive) continuation.resume(Unit) }
+                    override fun onCancelled(gestureDescription: GestureDescription?) { if (continuation.isActive) continuation.resumeWithException(ToolFailure(ToolStatus.UNKNOWN, "Android прервал жест; он мог выполниться частично. Проверьте экран.")) }
+                }, null)
+                if (accepted) { visuals?.pulse(); if (moves) visuals?.traceTo(x2, y2) }
+                if (!accepted && continuation.isActive) continuation.resumeWithException(ToolFailure(ToolStatus.ERROR, "Android не принял жест."))
+            } }
+        } catch (e: TimeoutCancellationException) {
+            // A stuck gesture is a failed step, not the end of the whole task; it may still have happened.
+            currentCoroutineContext().ensureActive()
+            throw ToolFailure(ToolStatus.UNKNOWN, "Android не подтвердил жест за 5 секунд. Проверьте screen, не повторяя жест.")
+        } finally { panel?.temporarilyHide(false) }
     }
     /** A label is often not clickable itself; like a finger, the tap lands on its nearest clickable container. */
     private fun click(target: AccessibilityNodeInfo): Boolean {

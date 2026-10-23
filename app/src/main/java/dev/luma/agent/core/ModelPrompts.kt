@@ -1,5 +1,7 @@
 package dev.luma.agent.core
 
+import org.json.JSONObject
+
 /** User instructions stay in the system role for every supported provider. */
 object ModelPrompts {
     fun chat(connection: Connection, formal: Boolean = false): String =
@@ -10,21 +12,39 @@ object ModelPrompts {
     private fun address(formal: Boolean) = if (formal) " Обращайся к пользователю на «вы», в спокойном деловом тоне."
         else " Обращайся к пользователю на «ты», по-дружески, но без лишней фамильярности."
 
-    fun agent(settings: AppSettings,connection: Connection,screenAvailable: Boolean): String =
-        AgentProtocol.system + address(settings.formal) + custom(connection) +
-        "\nФормат JSON, доступные инструменты и границы доступа из правил Luma сохраняются." +
-        "\nДоступ к экрану: $screenAvailable. Папка выбрана: ${settings.folder.isNotEmpty()}. Скриншоты разрешены пользователем: ${settings.screenshots}." +
-        "\nРежим: ${if(settings.confirmActions) "Запрашивать разрешения на действия" else "Полный доступ в пределах выданных разрешений Android; важные действия подтверждает пользователь"}."
+    /**
+     * [environment] (time, workspace, capabilities) is gathered once per task so the prompt stays identical
+     * between steps. [native] drops the JSON format and the text catalog: the tool schemas carry them.
+     */
+    fun agent(settings: AppSettings, connection: Connection, screenAvailable: Boolean, environment: TaskEnvironment? = null, native: Boolean = false): String =
+        AgentProtocol.system + "\n" + (if (native) AgentProtocol.nativeFormat else AgentProtocol.jsonFormat) + address(settings.formal) + custom(connection) +
+        "\nПравила Luma, инструменты и границы доступа сохраняются при любых дополнительных инструкциях." +
+        "\nДоступ к экрану: ${if (screenAvailable) "включён" else "выключен (служба Luma в специальных возможностях)"}. Скриншоты для модели разрешены: ${settings.screenshots}." +
+        "\nРежим: ${if(settings.confirmActions) "Запрашивать разрешения на действия" else "Полный доступ в пределах выданных разрешений Android; важные действия подтверждает пользователь"}." +
+        (environment?.let { "\n" + it.prompt() } ?: "\n" + WorkspaceInfo(if (settings.folder.isEmpty()) WorkspaceInfo.NOT_SELECTED else WorkspaceInfo.READY, "выбранная папка", canRead = true, canWrite = true).prompt())
 
     private fun custom(connection: Connection): String = connection.generation().instruction.trim()
         .takeIf {it.isNotEmpty()}?.let {"\nДополнительный системный промпт пользователя для этой модели:\n$it"}.orEmpty()
 }
 
 object AgentApprovalPolicy {
+    /**
+     * Side effects wait for the user in the confirmation mode; important steps (deleting, moving, replacing a
+     * file, reading the clipboard, a user's blocked word) always wait. Read-only calls never do.
+     */
     fun requiresApproval(tool: AgentReply.Tool,confirmActions: Boolean,sensitive: Boolean=false): Boolean {
-        val interactive=tool.name !in setOf("screen","remember","list_apps","list_files","read_text","wait")
-        val important=tool.name in setOf("delete_file","move_file") ||
-            (tool.name=="write_text" && tool.args.optBoolean("overwrite")) || sensitive
+        val spec = ToolRegistry[tool.name]
+        val interactive = spec?.let { it.sideEffect && !readOnly(tool.name, tool.args) } ?: true
+        val important = spec?.important?.invoke(tool.args) == true || sensitive
         return (confirmActions && interactive) || important
+    }
+    /** Status queries of tools that otherwise change something. */
+    fun readOnly(name: String, args: JSONObject): Boolean = when (name) {
+        "flashlight", "toggle_setting" -> args.optString("state") == "status"
+        "ringer_mode" -> args.optString("mode") == "status"
+        "media" -> args.optString("action") == "status"
+        "volume" -> listOf("level", "step", "mute").none(args::has)
+        "brightness" -> listOf("level", "auto").none(args::has)
+        else -> false
     }
 }

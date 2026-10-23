@@ -121,10 +121,20 @@ import kotlin.math.roundToInt
                 if(model.isNotBlank()) {
                     item { SoftCard {
                         Text("Размер ответа",style=MaterialTheme.typography.titleMedium)
-                        SettingToggle("Автоматический лимит","По возможностям выбранной модели, до 8192 токенов",parameters.maxTokens==0) {v->generation {it.copy(maxTokens=if(v) 0 else 2048)}}
-                        if(parameters.maxTokens>0) SettingSlider("Максимум токенов",parameters.maxTokens.toFloat(),256f..8192f,parameters.maxTokens.toString()) {v->generation {it.copy(maxTokens=v.roundToInt())}}
+                        val known=settings.connection().models.firstOrNull {it.id==model}?.outputLimit?.takeIf {it>0}
+                        SettingToggle("Авто / максимум модели",if(known!=null) "Без ограничения Luma. Модель отвечает до ${tokenLabel(known)}" else "Без ограничения Luma. Предел задают модель и сервер",parameters.maxTokens==0) {v->
+                            generation {it.copy(maxTokens=if(v) 0 else minOf(known ?: 8192,8192))}}
+                        if(parameters.maxTokens>0) {
+                            // Presets from 256 up to the model's own maximum (or 128K when the provider does not publish it).
+                            val steps=(listOf(256,512,1024,2048,4096,8192,16_384,32_768,65_536,131_072).filter {known==null || it<known} + listOfNotNull(known)).distinct()
+                            val at=steps.indexOfFirst {it>=parameters.maxTokens}.let {if(it<0) steps.lastIndex else it}
+                            SettingSlider("Свой лимит ответа",at.toFloat(),0f..steps.lastIndex.toFloat(),tokenLabel(steps[at]),steps=(steps.size-2).coerceAtLeast(0)) {v->generation {it.copy(maxTokens=steps[v.roundToInt().coerceIn(0,steps.lastIndex)])}}
+                        }
                         SettingSlider("Контекст чата",parameters.contextTurns.toFloat(),2f..30f,"${parameters.contextTurns} сообщений",steps=13) {v->generation {it.copy(contextTurns=v.roundToInt())}}
-                        Text("Лимит ответа и системный промпт применяются к чату и агенту. Контекст — к чату. Активная задача использует параметры, с которыми запущена.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("«Авто» значит, что Luma не добавляет своего ограничения. Ответ всё равно конечен: его ограничивают максимальный ответ модели, контекстное окно и квоты провайдера или сервера. " +
+                            (when(provider) {Provider.CLAUDE->"Claude требует явный лимит — Luma отправляет максимум выбранной модели.";Provider.LOCAL->"Локальный сервер сам решает, где остановиться; у Ollama размер контекста задаётся на сервере (OLLAMA_CONTEXT_LENGTH или num_ctx в Modelfile).";else->"Параметр лимита не отправляется, и провайдер использует свой предел."}),
+                            style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Лимит ответа — это не бюджет токенов задачи и не лимит шагов агента: они настраиваются в «Агент» → «Пределы задачи». Лимит ответа и системный промпт применяются к чату и агенту, контекст — к чату. Активная задача использует параметры, с которыми запущена.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     } }
                     item { SoftCard {
                         Text("Стиль ответа",style=MaterialTheme.typography.titleMedium)
@@ -148,6 +158,18 @@ import kotlin.math.roundToInt
                     Text("Удаление, перемещение, перезапись файлов и нажатия со словами из списка «Запрещённые слова» (Параметры модели) требуют отдельного подтверждения. Режим не выдаёт новые разрешения Android.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     SettingToggle("Плавающая панель","Разворачиваемая панель шагов; кнопка «Стоп» доступна всегда",settings.panel) {v->graph.update {it.copy(panel=v)}}
                     TextButton(onClick=openAccess) {Icon(Icons.Outlined.Security,null);Spacer(Modifier.width(8.dp));Text("Разрешения и папка для файлов")}
+                } }
+                item { SoftCard {
+                    Text("Вызов инструментов",style=MaterialTheme.typography.titleMedium)
+                    val modes=listOf("auto" to "Авто","native" to "Функции","json" to "JSON")
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        modes.forEachIndexed {i,(value,title) -> SegmentedButton(settings.toolCalling==value,{graph.update {it.copy(toolCalling=value)}},SegmentedButtonDefaults.itemShape(i,modes.size),Modifier.testTag("tool-calling-$value"),enabled=!run.active) {Text(title,maxLines=1)}}
+                    }
+                    Text(when(settings.toolCalling) {
+                        "native"->"Только встроенный вызов функций провайдера. Если сервер его не поддерживает, задача остановится с ошибкой."
+                        "json"->"Модель отвечает JSON-командами. Подходит для локальных моделей без поддержки инструментов."
+                        else->"Встроенный вызов функций, если сервер его поддерживает; иначе Luma сама переходит на JSON-команды."
+                    },style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 } }
                 item { SoftCard {
                     Text("Пределы задачи",style=MaterialTheme.typography.titleMedium)
@@ -177,6 +199,12 @@ import kotlin.math.roundToInt
             Icon(Icons.Outlined.ChevronRight,null)
         }
     }
+}
+private fun tokenLabel(tokens: Int): String = when {
+    tokens>=1_000_000 -> "${tokens/1_000_000} млн токенов"
+    tokens>=1024 && tokens%1024==0 -> "${tokens/1024}K токенов"
+    tokens>=1000 -> "${"%.1f".format(java.util.Locale.ROOT,tokens/1000.0).removeSuffix(".0").replace('.',',')} тыс. токенов"
+    else -> "$tokens токенов"
 }
 @Composable private fun SettingToggle(title: String,subtitle: String,checked: Boolean,change: (Boolean)->Unit) {
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically) {

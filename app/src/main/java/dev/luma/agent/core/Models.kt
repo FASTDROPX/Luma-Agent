@@ -11,14 +11,32 @@ enum class Provider(val label: String, val base: String, val keyRequired: Boolea
     DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1/"),
     LOCAL("Локальный сервер", "", false)
 }
-/** [imageOutput]: the model can draw pictures in its reply. */
-data class ModelInfo(val id: String, val name: String = id, val vision: Boolean = false, val outputLimit: Int = 8192, val imageOutput: Boolean = false) {
-    fun json() = JSONObject().put("id", id).put("name", name).put("vision", vision).put("outputLimit", outputLimit).put("imageOutput", imageOutput)
+/**
+ * [imageOutput]: the model can draw pictures in its reply. [outputLimit] is the provider's own maximum reply
+ * length in tokens; 0 means the provider does not publish it.
+ */
+data class ModelInfo(val id: String, val name: String = id, val vision: Boolean = false, val outputLimit: Int = 0, val imageOutput: Boolean = false) {
+    fun json() = JSONObject().put("id", id).put("name", name).put("vision", vision).put("outputLimit", outputLimit).put("limitV", 2).put("imageOutput", imageOutput)
+    companion object {
+        /** Catalogs saved before 0.8 capped every limit at 8192; such a value is treated as unknown until the list is refreshed. */
+        fun parse(j: JSONObject): ModelInfo {
+            val stored = j.optInt("outputLimit", 0)
+            val limit = if (j.has("limitV")) stored else if (stored in 1 until 8192) stored else 0
+            return ModelInfo(j.optString("id"), j.optString("name"), j.optBoolean("vision"), limit.coerceIn(0, MAX_OUTPUT_TOKENS), j.optBoolean("imageOutput"))
+        }
+    }
 }
-/** Optional sampling stays off by default: reasoning models often reject explicit sampling. */
+/** Upper bound for a manual reply limit; real requests are also capped by the model's published limit. */
+const val MAX_OUTPUT_TOKENS = 1_048_576
+/** One native function call from the model. [raw] keeps provider data that must be sent back unchanged (Gemini thought signatures). */
+data class ToolCall(val id: String, val name: String, val args: JSONObject, val raw: JSONObject? = null)
+/**
+ * Optional sampling stays off by default: reasoning models often reject explicit sampling.
+ * [maxTokens] 0 is «Авто / максимум модели»: Luma adds no reply limit of its own.
+ */
 data class GenerationSettings(val maxTokens: Int = 0, val temperature: Float = -1f, val topP: Float = -1f,
     val contextTurns: Int = 20, val instruction: String = "") {
-    fun sanitized() = copy(maxTokens = if (maxTokens == 0) 0 else maxTokens.coerceIn(256,8192),
+    fun sanitized() = copy(maxTokens = if (maxTokens <= 0) 0 else maxTokens.coerceIn(256,MAX_OUTPUT_TOKENS),
         temperature = if (!temperature.isFinite() || temperature < 0) -1f else temperature.coerceIn(0f,1f),
         topP = if (!topP.isFinite() || topP < 0) -1f else topP.coerceIn(.05f,1f),
         contextTurns = contextTurns.coerceIn(2,30), instruction = instruction.take(4000))
@@ -64,7 +82,9 @@ data class AppSettings(
     /** Pause the agent after this many thousand tokens in one task; 0 = no limit. */
     val agentTokenLimit: Int = 0,
     /** "friendly" addresses the user as «ты», "formal" as «вы» — in the interface and in the model's replies. */
-    val tone: String = "friendly"
+    val tone: String = "friendly",
+    /** How the agent calls tools: "auto" (native function calling, JSON commands if the server rejects it), "native" or "json". */
+    val toolCalling: String = "auto"
 ) {
     val formal: Boolean get() = tone == "formal"
     fun connection(p: Provider = provider) = connections[p] ?: Connection()
@@ -81,7 +101,7 @@ data class AppSettings(
             .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
             .put("maxSteps",maxSteps.coerceIn(5,30)).put("taskMinutes",taskMinutes.coerceIn(2,15)).put("unlimitedAgent", unlimitedAgent)
             .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH)).put("tokenMeter", tokenMeter)
-            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone)
+            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling)
     }
     companion object {
         fun parse(json: JSONObject): AppSettings {
@@ -90,7 +110,7 @@ data class AppSettings(
                 val models = c.optJSONArray("models") ?: JSONArray()
                 val parameters = c.optJSONObject("parameters") ?: JSONObject()
                 Connection(c.optString("key"), c.optString("model"), c.optString("endpoint"),
-                    (0 until models.length()).mapNotNull { i -> models.optJSONObject(i)?.let { ModelInfo(it.optString("id"), it.optString("name"), it.optBoolean("vision"), it.optInt("outputLimit", 8192), it.optBoolean("imageOutput")) } }, c.optLong("catalogAt"),
+                    (0 until models.length()).mapNotNull { i -> models.optJSONObject(i)?.let(ModelInfo::parse) }, c.optLong("catalogAt"),
                     parameters.keys().asSequence().take(1000).mapNotNull { id -> parameters.optJSONObject(id)?.let { id to GenerationSettings.parse(it) } }.toMap())
             }
             return AppSettings(json.optBoolean("onboarded"), runCatching { Provider.valueOf(json.optString("provider")) }.getOrDefault(Provider.GEMINI),
@@ -99,10 +119,12 @@ data class AppSettings(
                 VisualSettings.parse(json.optJSONObject("visuals") ?: JSONObject()),json.optInt("maxSteps",20).coerceIn(5,30),json.optInt("taskMinutes",8).coerceIn(2,15),json.optBoolean("unlimitedAgent",true),
                 json.optString("blockedWords").take(BlockedWords.MAX_LENGTH), json.optBoolean("tokenMeter", true),
                 json.optDouble("chatTextScale", 1.0).toFloat().let { if (it.isFinite()) it.coerceIn(.85f, 1.4f) else 1f }, json.optBoolean("haptics", true),
-                json.optInt("agentTokenLimit", 0).coerceIn(0, 5000), json.optString("tone", "friendly").takeIf { it in listOf("friendly", "formal") } ?: "friendly")
+                json.optInt("agentTokenLimit", 0).coerceIn(0, 5000), json.optString("tone", "friendly").takeIf { it in listOf("friendly", "formal") } ?: "friendly",
+                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto")
         }
     }
 }
+val TOOL_CALLING_MODES = listOf("auto", "native", "json")
 /** User-defined words that force a confirmation; there is no built-in list. */
 object BlockedWords {
     const val MAX_LENGTH = 2000
@@ -111,7 +133,12 @@ object BlockedWords {
 }
 open class UserError(override val message: String) : RuntimeException(message)
 fun safeError(error: Throwable): String = if (error is UserError) error.message else "Не получилось выполнить запрос. Проверьте подключение и попробуйте ещё раз."
-data class Turn(val role: String, val text: String, val image: String? = null, val attachments: List<AttachmentData> = emptyList())
+/**
+ * One message for the model. An assistant turn may carry native [toolCalls]; a "tool" turn answers the call
+ * [toolCallId] of [toolName]. Only the agent creates these; the chat history holds plain user/assistant turns.
+ */
+data class Turn(val role: String, val text: String, val image: String? = null, val attachments: List<AttachmentData> = emptyList(),
+    val toolCalls: List<ToolCall> = emptyList(), val toolCallId: String? = null, val toolName: String? = null)
 data class ChatMessage(val id: Long, val role: String, val text: String, val timestamp: Long, val attachments: List<Attachment> = emptyList(),
     val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false)
 data class Conversation(val id: Long, val title: String, val updated: Long, val pinned: Boolean = false)

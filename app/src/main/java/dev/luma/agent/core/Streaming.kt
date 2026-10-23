@@ -29,7 +29,8 @@ data class TokenStats(val inputTokens: Int, val outputTokens: Int, val firstToke
     }
 }
 
-data class Generation(val text: String, val reasoning: String = "", val stats: TokenStats? = null, val images: List<GeneratedImage> = emptyList())
+data class Generation(val text: String, val reasoning: String = "", val stats: TokenStats? = null, val images: List<GeneratedImage> = emptyList(),
+    val toolCalls: List<ToolCall> = emptyList())
 
 /** A picture the model drew; bytes are kept as received and normalised only when saved to the chat. */
 class GeneratedImage(val mime: String, val bytes: ByteArray) {
@@ -72,6 +73,10 @@ internal class StreamAssembler(private val format: WireFormat, private val start
     private var claudeOutput = -1
     private var anyCandidate = false
     private var size = 0
+    /** Native tool calls arrive in pieces: OpenAI by index with argument fragments, Claude as input_json_delta, Gemini as whole parts. */
+    private class PartialCall(var id: String = "", var name: String = "", val arguments: StringBuilder = StringBuilder())
+    private val calls = sortedMapOf<Int, PartialCall>()
+    private val geminiCalls = mutableListOf<JSONObject>()
 
     fun accept(data: String) {
         val payload = data.trim()
@@ -86,6 +91,13 @@ internal class StreamAssembler(private val format: WireFormat, private val start
                 choice?.optJSONObject("delta")?.let { delta ->
                     thought(delta.optString("reasoning_content").ifEmpty { delta.optString("reasoning") })
                     answer(delta.optString("content"))
+                    delta.optJSONArray("tool_calls")?.let { list -> for (i in 0 until list.length()) {
+                        val piece = list.optJSONObject(i) ?: continue; mark()
+                        val call = calls.getOrPut(piece.optInt("index", i)) { PartialCall() }
+                        piece.optString("id").takeIf { it.isNotEmpty() && it != "null" }?.let { call.id = it }
+                        piece.optJSONObject("function")?.let { f -> f.optString("name").takeIf { it.isNotEmpty() && it != "null" }?.let { call.name = it }
+                            f.opt("arguments").let { a -> if (a is String) call.arguments.append(a) else if (a is JSONObject) call.arguments.append(a.toString()) } }
+                    } }
                 }
                 choice?.optString("finish_reason")?.takeIf { it.isNotEmpty() && it != "null" }?.let { finish = it }
                 j.optJSONObject("usage")?.let { usage = it }
@@ -96,6 +108,7 @@ internal class StreamAssembler(private val format: WireFormat, private val start
                 val parts = candidate?.optJSONObject("content")?.optJSONArray("parts")
                 for (i in 0 until (parts?.length() ?: 0)) {
                     val part = parts!!.optJSONObject(i) ?: continue
+                    if (part.has("functionCall")) { mark(); geminiCalls += JSONObject(part.toString()); continue }
                     if (part.optBoolean("thought")) thought(part.optString("text")) else answer(part.optString("text"))
                 }
                 candidate?.optString("finishReason")?.takeIf { it.isNotEmpty() }?.let { finish = it }
@@ -104,10 +117,15 @@ internal class StreamAssembler(private val format: WireFormat, private val start
             WireFormat.CLAUDE -> when (j.optString("type")) {
                 "message_start" -> j.optJSONObject("message")?.optJSONObject("usage")?.let { claudeInput = it.optInt("input_tokens", -1) }
                 "content_block_start" -> j.optJSONObject("content_block")?.let { block ->
-                    if (block.optString("type") == "thinking") thought(block.optString("thinking")) else answer(block.optString("text"))
+                    when (block.optString("type")) {
+                        "thinking" -> thought(block.optString("thinking"))
+                        "tool_use" -> { mark(); calls[j.optInt("index")] = PartialCall(block.optString("id"), block.optString("name")) }
+                        else -> answer(block.optString("text"))
+                    }
                 }
                 "content_block_delta" -> j.optJSONObject("delta")?.let { delta ->
-                    when (delta.optString("type")) { "thinking_delta" -> thought(delta.optString("thinking")); "text_delta" -> answer(delta.optString("text")) }
+                    when (delta.optString("type")) { "thinking_delta" -> thought(delta.optString("thinking")); "text_delta" -> answer(delta.optString("text"))
+                        "input_json_delta" -> calls[j.optInt("index")]?.arguments?.append(delta.optString("partial_json")) }
                 }
                 "message_delta" -> {
                     j.optJSONObject("delta")?.optString("stop_reason")?.takeIf { it.isNotEmpty() && it != "null" }?.let { finish = it }
@@ -127,13 +145,17 @@ internal class StreamAssembler(private val format: WireFormat, private val start
         val timing = JSONObject().put("firstMs", ms(firstNs)).put("contentMs", ms(contentNs)).put("totalMs", ((now - startedNs) / 1_000_000).coerceAtLeast(1))
         val root = when (format) {
             WireFormat.OPENAI -> JSONObject().put("choices", JSONArray().put(JSONObject()
-                .put("message", JSONObject().put("content", text.toString()).put("reasoning", reasoning.toString())).put("finish_reason", finish)))
+                .put("message", JSONObject().put("content", text.toString()).put("reasoning", reasoning.toString()).apply {
+                    if (calls.isNotEmpty()) put("tool_calls", JSONArray(calls.values.map { c -> JSONObject().put("id", c.id).put("type", "function")
+                        .put("function", JSONObject().put("name", c.name).put("arguments", c.arguments.toString())) }))
+                }).put("finish_reason", finish)))
                 .apply { usage?.let { put("usage", it) } }
             WireFormat.GEMINI -> JSONObject().apply {
                 if (anyCandidate) {
                     val parts = JSONArray()
                     if (reasoning.isNotEmpty()) parts.put(JSONObject().put("text", reasoning.toString()).put("thought", true))
                     parts.put(JSONObject().put("text", text.toString()))
+                    geminiCalls.forEach { parts.put(it) }
                     put("candidates", JSONArray().put(JSONObject().put("content", JSONObject().put("parts", parts)).put("finishReason", finish)))
                 }
                 usage?.let { put("usageMetadata", it) }
@@ -141,6 +163,8 @@ internal class StreamAssembler(private val format: WireFormat, private val start
             WireFormat.CLAUDE -> JSONObject().put("stop_reason", finish).put("content", JSONArray().apply {
                 if (reasoning.isNotEmpty()) put(JSONObject().put("type", "thinking").put("thinking", reasoning.toString()))
                 put(JSONObject().put("type", "text").put("text", text.toString()))
+                calls.values.forEach { c -> put(JSONObject().put("type", "tool_use").put("id", c.id).put("name", c.name)
+                    .put("input", c.arguments.toString().ifBlank { "{}" }.let { raw -> runCatching { JSONObject(raw) }.getOrElse { JSONObject().put("__invalid", raw.take(2000)) } })) }
             }).apply {
                 if (claudeInput >= 0 || claudeOutput >= 0) put("usage", JSONObject().put("input_tokens", claudeInput.coerceAtLeast(0)).put("output_tokens", claudeOutput.coerceAtLeast(0)))
             }

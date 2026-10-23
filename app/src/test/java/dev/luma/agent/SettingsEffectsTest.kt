@@ -66,7 +66,8 @@ class SettingsEffectsTest {
             .withGeneration(Provider.OPENAI,"first") {GenerationSettings(instruction="C")}
             .copy(visuals=VisualSettings(orbitSpeed=100f,returnDelay=-5f,particleCount=999))
         val restored=AppSettings.parse(settings.json())
-        assertEquals(8192,restored.connection(Provider.GEMINI).parameters["first"]!!.maxTokens)
+        // No 8192 ceiling any more: a manual limit is kept and later capped by the model's own maximum.
+        assertEquals(100_000,restored.connection(Provider.GEMINI).parameters["first"]!!.maxTokens)
         assertEquals("B",restored.connection(Provider.GEMINI).parameters["second"]!!.instruction)
         assertEquals("C",restored.connection(Provider.OPENAI).parameters["first"]!!.instruction)
         assertEquals(180,restored.visuals.particleCount);assertEquals(2f,restored.visuals.orbitSpeed);assertEquals(2f,restored.visuals.returnDelay)

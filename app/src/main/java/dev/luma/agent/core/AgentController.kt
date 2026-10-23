@@ -1,8 +1,6 @@
 package dev.luma.agent.core
 
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
 import dev.luma.agent.AgentAccessibilityService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -17,7 +15,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import org.json.JSONArray
 import org.json.JSONObject
 
 class AgentController(private val context: Context, private val scope: CoroutineScope, private val vault: SettingsVault,
@@ -28,6 +25,11 @@ class AgentController(private val context: Context, private val scope: Coroutine
     private var approval: CompletableDeferred<Boolean>? = null
     private var retry: CompletableDeferred<Unit>? = null
     private var stoppedMessage = "Задача остановлена."
+    /** Screen access; the Accessibility service in the app, a fake in tests. */
+    internal var screen: () -> ScreenDriver? = { AgentAccessibilityService.instance }
+    /** Provider/model pairs whose server rejected native tool calls in this session; they use JSON commands. */
+    private val jsonOnly = mutableSetOf<String>()
+
     fun start(chat: Long, goal: String, finished: () -> Unit) {
         if (job?.isActive == true) return
         val settings = vault.state.value; val connection = settings.connection()
@@ -39,6 +41,11 @@ class AgentController(private val context: Context, private val scope: Coroutine
                     val history = chats.history(chat, 8).dropWhile { it.role != "user" }
                     val memory = AgentContext(history, goal)
                     val loopGuard = AgentLoopGuard()
+                    // Gathered once: the prompt stays identical between steps, so providers can cache it.
+                    val environment = withContext(Dispatchers.IO) { TaskEnvironment.capture(context, screen() != null, settings.folder) }
+                    val modelKey = "${settings.provider}/${connection.model}"
+                    var native = settings.toolCalling == "native" || (settings.toolCalling == "auto" && modelKey !in jsonOnly)
+                    var lastUnknown: String? = null
                     var step = 0
                     // The token limit pauses the task; continuing allows one more portion of the same size.
                     val tokenPortion = settings.agentTokenLimit.coerceAtLeast(0) * 1000L
@@ -46,7 +53,10 @@ class AgentController(private val context: Context, private val scope: Coroutine
                     while (settings.unlimitedAgent || step < settings.maxSteps.coerceIn(5,30)) {
                         awaitRunning(); step = (step + 1).coerceAtLeast(1); update("Обдумываю следующий шаг", step)
                         val stepStarted = android.os.SystemClock.elapsedRealtime()
-                        val generation = generateRecovering(settings,connection,memory.turns(vault.state.value.screenshots),step)
+                        val generation = generateRecovering(settings, connection, step, native, { memory.turns(vault.state.value.screenshots) },
+                            { useNative -> ModelPrompts.agent(vault.state.value, connection, screen() != null, environment, useNative) }) {
+                            native = false; jsonOnly += modelKey
+                        }
                         val raw = generation.text
                         chats.addUsage(chat, generation.stats)
                         val spent = mutable.value.tokens + (generation.stats?.let { it.inputTokens + it.outputTokens } ?: 0)
@@ -56,36 +66,51 @@ class AgentController(private val context: Context, private val scope: Coroutine
                             mutable.value = mutable.value.copy(paused = true, stage = "Задача потратила ${"%,d".format(spent).replace(',', ' ')} токенов — это предел из настроек. Агент на паузе: можно продолжить ещё на столько же или остановить.")
                         }
                         awaitRunning()
-                        when (val reply = AgentProtocol.parse(raw)) {
+                        when (val reply = reply(generation, native)) {
                             is AgentReply.Final -> { chats.append(chat, "assistant", reply.text, reasoning = generation.reasoning, stats = generation.stats); update("Готово", step); return@withTimeout }
                             is AgentReply.Tool -> {
                                 val label = describe(reply)
                                 update(label, step)
-                                val blocked = AgentAccessibilityService.instance?.sensitive(reply.name, reply.args, vault.state.value.blockedWords)
-                                if (AgentApprovalPolicy.requiresApproval(reply,vault.state.value.confirmActions,blocked != null)) {
-                                    val details = confirmationDetails(reply) + blocked?.let { "\n$it" }.orEmpty()
-                                    val accepted = requestApproval(Approval(label, details, reply.name in setOf("tap", "tap_point", "scroll", "swipe", "set_text", "back", "home")))
-                                    if (!accepted) { chats.append(chat, "assistant", "Действие отменено вами. Задача остановлена."); return@withTimeout }
+                                val invalid = try { ToolRegistry.validate(reply.name, reply.args); null } catch (e: ToolFailure) { e }
+                                val fingerprint = fingerprint(reply)
+                                val repeatUnknown = invalid == null && lastUnknown == fingerprint
+                                if (invalid == null) {
+                                    val blocked = screen()?.sensitive(reply.name, reply.args, vault.state.value.blockedWords)
+                                    if (repeatUnknown || AgentApprovalPolicy.requiresApproval(reply, vault.state.value.confirmActions, blocked != null)) {
+                                        val details = confirmationDetails(reply) + blocked?.let { "\n$it" }.orEmpty() +
+                                            if (repeatUnknown) "\nРезультат такого же предыдущего шага неизвестен: он мог уже выполниться. Повторить?" else ""
+                                        val accepted = requestApproval(Approval(label, details, ToolRegistry[reply.name]?.screen == true || reply.name in setOf("tap", "tap_point", "scroll", "swipe", "set_text")))
+                                        if (!accepted) { chats.append(chat, "assistant", "Действие отменено вами. Задача остановлена."); return@withTimeout }
+                                    }
                                 }
                                 awaitRunning()
-                                val result = try {
-                                    if (reply.name == "remember") {
-                                        memory.remember(reply.args.requiredString("notes", 4000))
-                                        ToolResult(JSONObject().put("saved", true))
-                                    } else execute(reply, settings, connection)
-                                }
-                                    catch (e: UserError) { ToolResult(JSONObject().put("error", e.message).put("note", "Не считайте действие выполненным. Обновите экран или объясните ограничение.")) }
-                                    catch (e: TimeoutCancellationException) {
-                                        // Only the task's own time limit may end the task; a tool's inner timeout is a failed step.
-                                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                                        ToolResult(JSONObject().put("error", "Действие не завершилось вовремя.").put("note", "Не считайте действие выполненным. Обновите экран."))
+                                val result = if (invalid != null) ToolResult(invalid.json()) else try {
+                                    when (reply.name) {
+                                        "remember" -> { memory.remember(reply.args.requiredString("notes", 4000)); ToolResult(JSONObject().put("status", ToolStatus.DONE).put("saved", true)) }
+                                        "describe_tool" -> ToolResult(describeTool(reply.args.getString("name"), environment))
+                                        else -> execute(reply)
                                     }
-                                if (reply.skipped > 0) result.json.put("protocolNote", "Выполнена только первая команда, ещё ${reply.skipped} отброшено. Присылай одну команду за ответ и планируй следующий шаг по новому экрану.")
+                                }
+                                    catch (e: ToolFailure) { ToolResult(e.json()) }
+                                    catch (e: UserError) { ToolResult(JSONObject().put("status", ToolStatus.ERROR).put("error", e.message).put("note", "Не считайте действие выполненным. Обновите экран или объясните ограничение.")) }
+                                    catch (e: TimeoutCancellationException) {
+                                        // Only the task's own time limit may end the task; a tool's inner timeout is a step with an unknown result.
+                                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                                        ToolResult(JSONObject().put("status", ToolStatus.UNKNOWN).put("message", "Действие не завершилось вовремя; оно могло выполниться. Проверьте состояние, не повторяя его."))
+                                    }
+                                val status = normalize(result.json)
+                                lastUnknown = if (status == ToolStatus.UNKNOWN && ToolRegistry[reply.name]?.sideEffect != false) fingerprint else null
+                                if (reply.skipped > 0) result.json.put("protocolNote", "Выполнена только первая команда, ещё ${reply.skipped} отброшено. Присылай одну команду за ответ и планируй следующий шаг по новому результату.")
                                 val took = android.os.SystemClock.elapsedRealtime() - stepStarted
-                                val ok = !result.json.has("error")
-                                chats.append(chat, "tool", label + (if (ok) " · готово" else " · ${result.json.optString("error")}") + " · ${formatSeconds(took)}")
+                                val ok = status == ToolStatus.DONE
+                                chats.append(chat, "tool", label + " · " + outcome(status, result.json) + " · ${formatSeconds(took)}")
                                 mutable.value = mutable.value.copy(log = (mutable.value.log + StepLog(step, label, took, ok, generation.stats?.outputPerSecond)).takeLast(200))
                                 memory.record(reply, raw, result.json, result.image)
+                                // Without a workspace no file step can work; the user gets the way to pick a folder at once, without further model calls.
+                                if (result.json.optString("code") == FolderTools.WORKSPACE_UNAVAILABLE) {
+                                    chats.append(chat, "assistant", result.json.optString("message") + "\n\n" + result.json.optString("userAction") + " Затем повторите задачу. Уже выполненные шаги сохранены.")
+                                    update("Нужна рабочая папка", step); return@withTimeout
+                                }
                                 if (reply.name != "remember" && loopGuard.repeated(reply, result.json)) {
                                     mutable.value = mutable.value.copy(paused = true, stage = "Повторяются одинаковые шаги без изменений. Агент на паузе, чтобы сохранить квоту. Можно продолжить или остановить задачу.")
                                 }
@@ -111,16 +136,26 @@ class AgentController(private val context: Context, private val scope: Coroutine
     fun togglePause() { if (mutable.value.active) mutable.value = mutable.value.copy(paused = !mutable.value.paused) }
     fun decide(accepted: Boolean) { approval?.complete(accepted) }
     fun retryRequest() {retry?.complete(Unit)}
-    private suspend fun generateRecovering(settings: AppSettings,connection: Connection,turns: List<Turn>,step: Int): Generation {
+
+    /** Native calls first; a text reply in native mode is either a JSON command (servers without tool templates) or the final answer. */
+    private fun reply(generation: Generation, native: Boolean): AgentReply = when {
+        generation.toolCalls.isNotEmpty() -> AgentProtocol.fromCalls(generation.toolCalls, generation.text)
+        native -> try { AgentProtocol.parse(generation.text) } catch (e: UserError) { AgentReply.Final(generation.text.take(20_000)) }
+        else -> AgentProtocol.parse(generation.text)
+    }
+    private suspend fun generateRecovering(settings: AppSettings, connection: Connection, step: Int, startNative: Boolean, turns: () -> List<Turn>,
+        system: (Boolean) -> String, nativeRejected: () -> Unit): Generation {
+        var native = startNative
         while(true) {
             awaitRunning()
             try {
-                val currentTurns = if (vault.state.value.screenshots) turns else turns.map { it.copy(image = null) }
-                return api.generateDetailed(settings.provider,connection,currentTurns,
-                    ModelPrompts.agent(vault.state.value,connection,AgentAccessibilityService.connected.value),true) {attempt,wait ->
+                val current = turns().let { list -> if (vault.state.value.screenshots) list else list.map { it.copy(image = null) } }
+                return api.generateDetailed(settings.provider, connection, current, system(native), true, { attempt, wait ->
                     update("Провайдер временно недоступен · повтор $attempt/2 через ${wait/1000} с",step)
-                }
+                }, if (native) ToolRegistry.functions() else null)
             } catch(e: ProviderFailure) {
+                // A server that does not support function calling answers 400; in «Авто» the task goes on with JSON commands.
+                if (native && e.code == 400 && settings.toolCalling == "auto") { native = false; nativeRejected(); update("Сервер не поддерживает вызов функций — перехожу на JSON-команды", step); continue }
                 if(!e.retryable) throw e
                 val decision=CompletableDeferred<Unit>();retry=decision
                 mutable.value=mutable.value.copy(retryPending=true,stage="${e.message} Выполненные шаги сохранены.")
@@ -137,67 +172,73 @@ class AgentController(private val context: Context, private val scope: Coroutine
         return try { decision.await() } finally { approval = null; mutable.value = mutable.value.copy(approval = null) }
     }
     private data class ToolResult(val json: JSONObject, val image: String? = null)
-    private suspend fun execute(tool: AgentReply.Tool, settings: AppSettings, connection: Connection): ToolResult {
+    private fun fingerprint(tool: AgentReply.Tool) = tool.name + JSONObject(tool.args.toString()).apply { remove("snapshot") }.toString()
+    /** Every result carries a status; older tool outputs without one are done unless they report an error. */
+    private fun normalize(json: JSONObject): String {
+        val status = json.optString("status").takeIf { it in ToolStatus.all } ?: if (json.has("error")) ToolStatus.ERROR else ToolStatus.DONE
+        json.put("status", status); return status
+    }
+    private fun outcome(status: String, json: JSONObject) = when (status) {
+        ToolStatus.DONE -> if (json.optBoolean("verified", true)) "готово" else "готово, без проверки"
+        ToolStatus.NEEDS_CONFIRMATION -> "ждёт вашего подтверждения"
+        ToolStatus.NEEDS_USER_ACTION -> "нужно ваше действие"
+        ToolStatus.UNKNOWN -> "результат не подтверждён"
+        ToolStatus.UNSUPPORTED -> "недоступно"
+        ToolStatus.DENIED -> "нет доступа"
+        else -> json.optString("error").ifBlank { "ошибка" }
+    }
+    private fun describeTool(name: String, environment: TaskEnvironment): JSONObject {
+        val spec = ToolRegistry[name] ?: return JSONObject().put("status", ToolStatus.ERROR).put("error", "Нет инструмента «${name.take(60)}».")
+            .put("tools", org.json.JSONArray(ToolRegistry.names.sorted()))
+        return spec.details().put("status", ToolStatus.DONE).put("availability", org.json.JSONArray(DeviceCapabilities.forTool(environment.capabilities, name).map {
+            JSONObject().put("feature", it.feature).put("level", it.level).put("note", it.note) }))
+    }
+    private fun driver(): ScreenDriver = screen() ?: throw ToolFailure(ToolStatus.NEEDS_USER_ACTION, "Служба управления Luma выключена.",
+        "Включите «Luma · управление телефоном» в специальных возможностях Android (Luma → «Доступ» → «Управление экраном»).", "accessibility")
+    private suspend fun execute(tool: AgentReply.Tool): ToolResult {
         val args = tool.args
-        if (tool.name in setOf("list_files", "read_text", "write_text", "rename_file", "copy_file", "move_file", "delete_file"))
-            return ToolResult(FolderTools(context, vault.state.value.folder).run(tool.name, args))
-        return when (tool.name) {
-            "screen" -> {
-                val service = AgentAccessibilityService.instance ?: throw UserError("Включите Luma в специальных возможностях Android.")
-                val vision = args.optBoolean("image", false) && vault.state.value.screenshots && connection.models.firstOrNull { it.id == connection.model }?.vision == true
-                val screen = service.observe(vision)
-                ToolResult(ScreenPayload.compact(screen.json, args.optString("query").take(200), args.optBoolean("detailed")), screen.image)
+        val spec = ToolRegistry[tool.name] ?: throw ToolFailure(ToolStatus.ERROR, "Неизвестный инструмент.")
+        return when {
+            spec.group == "files" -> ToolResult(FolderTools(context, vault.state.value.folder).run(tool.name, args))
+            tool.name in setOf("create_reminder", "list_reminders", "cancel_reminder") -> ToolResult(withContext(Dispatchers.IO) { ReminderStore(context).run(tool.name, args) })
+            spec.group == "device" || spec.group == "time" || spec.group == "apps" -> {
+                val result = DeviceTools(context).run(tool.name, args)
+                // Opening an app or a link changes the screen; its fresh tree comes with the result.
+                if (tool.name == "open_app" || tool.name == "open_url") { delay(800); withScreen(result) } else ToolResult(result)
             }
-            "list_apps" -> ToolResult(withContext(Dispatchers.IO) {
-                val query = args.requiredString("query", 100)
-                val apps = context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-                    .distinctBy { it.activityInfo.packageName }.filter { it.activityInfo.packageName != context.packageName }
-                    .filter { query.isBlank() || it.loadLabel(context.packageManager).contains(query, true) || it.activityInfo.packageName.contains(query, true) }
-                    .take(60).map { JSONObject().put("name", it.loadLabel(context.packageManager)).put("package", it.activityInfo.packageName) }
-                JSONObject().put("apps", JSONArray(apps))
-            })
-            "open_app" -> {
-                val pkg = args.requiredString("package", 240)
-                if (pkg == context.packageName || !pkg.matches(Regex("[A-Za-z0-9_.]+"))) throw UserError("Нельзя открыть этот пакет.")
-                val intent = context.packageManager.getLaunchIntentForPackage(pkg) ?: throw UserError("Приложение не найдено. Проверьте list_apps.")
-                withContext(Dispatchers.Main) { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }; delay(800)
-                withScreen(JSONObject().put("opened", pkg))
+            tool.name == "screen" -> {
+                val vision = args.optBoolean("image", false) && vault.state.value.screenshots && vault.state.value.connection().let { c -> c.models.firstOrNull { it.id == c.model }?.vision == true }
+                val observed = driver().observe(vision)
+                ToolResult(ScreenPayload.compact(observed.json, args.optString("query").take(200), args.optBoolean("detailed")).put("status", ToolStatus.DONE), observed.image)
             }
-            "wait" -> { delay(args.requiredInt("ms").coerceIn(0, 2000).toLong()); ToolResult(JSONObject().put("ok", true)) }
+            tool.name == "wait" -> { delay(args.requiredInt("ms").coerceIn(0, 2000).toLong()); ToolResult(JSONObject().put("status", ToolStatus.DONE).put("ok", true)) }
             else -> {
-                val service = AgentAccessibilityService.instance ?: throw UserError("Служба управления телефоном отключена.")
-                val result = service.execute(tool.name, args)
-                if (tool.name in setOf("tap", "tap_point", "scroll", "swipe", "set_text", "back", "home")) withScreen(result) else ToolResult(result)
+                val result = driver().execute(tool.name, args)
+                if (tool.name == "global_action" && args.optString("action") in setOf("lock_screen", "screenshot", "power_dialog")) ToolResult(result) else withScreen(result)
             }
         }
     }
     private suspend fun withScreen(result: JSONObject): ToolResult {
-        val service = AgentAccessibilityService.instance ?: return ToolResult(result)
+        val driver = screen() ?: return ToolResult(result)
         awaitRunning(); delay(250)
         try {
-            val screen = service.observe(false)
-            result.put("screen", ScreenPayload.compact(screen.json))
+            val observed = driver.observe(false)
+            result.put("screen", ScreenPayload.compact(observed.json))
         } catch (e: UserError) { result.put("screenError", e.message) }
         return ToolResult(result)
     }
     private fun describe(tool: AgentReply.Tool): String = when (tool.name) {
-        "screen" -> "Читаю текущий экран"
-        "remember" -> "Сохраняю заметки задачи"
-        "list_apps" -> "Ищу приложение"
-        "list_files" -> "Смотрю содержимое папки"
-        "read_text" -> "Читаю ${tool.args.optString("path")}".take(160)
-        "write_text" -> "Записать ${tool.args.optString("path")}".take(160)
-        "delete_file" -> "Удалить ${tool.args.optString("path")}".take(160)
-        "rename_file" -> "Переименовать в ${tool.args.optString("name")}".take(160)
-        "copy_file", "move_file" -> (if (tool.name == "copy_file") "Скопировать" else "Переместить") + " ${tool.args.optString("from")}".take(150)
-        "wait" -> "Жду обновления экрана"
-        else -> AgentAccessibilityService.instance?.actionLabel(tool.name, tool.args) ?: tool.message.ifBlank { "Действие на экране" }
+        "tap", "tap_point", "scroll", "swipe", "set_text" -> screen()?.actionLabel(tool.name, tool.args) ?: tool.message.ifBlank { "Действие на экране" }
+        else -> if (tool.name in ToolRegistry.names) ToolRegistry.label(tool.name, tool.args) else tool.message.ifBlank { tool.name.take(40) }
     }
     private fun confirmationDetails(tool: AgentReply.Tool): String = when (tool.name) {
         "delete_file" -> "Файл: ${tool.args.optString("path")}\nУдаление окончательное, без корзины."
         "write_text" -> "Файл: ${tool.args.optString("path")}\n${if (tool.args.optBoolean("overwrite")) "Содержимое будет заменено.\n" else ""}${tool.args.optString("text").take(600)}"
+        "append_text" -> "Файл: ${tool.args.optString("path")}\nБудет дописано:\n${tool.args.optString("text").take(600)}"
         "move_file", "copy_file" -> "Из: ${tool.args.optString("from")}\nВ: ${tool.args.optString("to")}"
         "rename_file" -> "${tool.args.optString("path")} → ${tool.args.optString("name")}"
-        else -> "${AgentAccessibilityService.instance?.actionLabel(tool.name, tool.args) ?: tool.name}\nРазрешите этот шаг или остановите задачу."
+        "clipboard" -> if (tool.args.optString("action") == "get") "Текст из буфера обмена будет передан модели (провайдеру). В буфере могут быть пароли или коды." else describe(tool)
+        "open_url" -> "Ссылка: ${tool.args.optString("url").take(300)}"
+        else -> "${describe(tool)}\nРазрешите этот шаг или остановите задачу."
     }
 }

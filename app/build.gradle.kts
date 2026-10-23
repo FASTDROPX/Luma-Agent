@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "dev.luma.agent"
     compileSdk = 35
-    defaultConfig { applicationId = "dev.luma.agent"; minSdk = 26; targetSdk = 35; versionCode = 14; versionName = "0.7.0" }
+    defaultConfig { applicationId = "dev.luma.agent"; minSdk = 26; targetSdk = 35; versionCode = 15; versionName = "0.8.0" }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
@@ -18,6 +18,10 @@ android {
         unitTests.isIncludeAndroidResources = true
         unitTests.all {
             it.maxHeapSize = "2300m"
+            // Robolectric's ParcelFileDescriptor (used by the documents-provider tests) needs this on JDK 17+.
+            it.jvmArgs("--add-opens=java.base/java.io=ALL-UNNAMED")
+            // Cyrillic file names in the workspace tests need a UTF-8 file-name encoding on Linux hosts.
+            it.environment("LC_ALL", "C.UTF-8")
             it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
         }
     }
