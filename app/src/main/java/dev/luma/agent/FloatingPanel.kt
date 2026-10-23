@@ -39,7 +39,7 @@ internal class FloatingPanel(private val service: AgentAccessibilityService, pri
     }
     fun temporarilyHide(value: Boolean) { hidden = value; view?.visibility = if (value) View.INVISIBLE else View.VISIBLE }
     private fun render() {
-        if (!current.active || !enabled) { remove(); expanded = false; return }
+        if (!current.active || !current.screen || !enabled) { remove(); expanded = false; return }
         // Same look as the app: dark surface, thin light border, gradient primary button. Collapsed it is a small
         // «✦ N» chip in the row of the Stop pill; expanded it is a compact card.
         val root = LinearLayout(service).apply {

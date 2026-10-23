@@ -155,7 +155,11 @@ data class RunState(val active: Boolean = false, val paused: Boolean = false, va
     /** Steps of this task, newest last, for the expandable log in the agent card. */
     val log: List<StepLog> = emptyList(),
     /** Tokens (prompt + reply) this task has spent so far. */
-    val tokens: Long = 0)
+    val tokens: Long = 0,
+    /** The agent has started acting (its first tool); until then the chat shows a plain «thinking» line, not the agent card. */
+    val acting: Boolean = false,
+    /** The task controls the screen or leaves Luma: only then the cursor, glow, Stop pill and floating panel appear. */
+    val screen: Boolean = false)
 /** One agent step: what it did, how long the model and the action took, and whether it worked. */
 data class StepLog(val number: Int, val label: String, val millis: Long, val ok: Boolean, val outputPerSecond: Double? = null)
 fun formatSeconds(millis: Long): String = if (millis < 60_000) "%.1f с".format(java.util.Locale.ROOT, millis / 1000.0).replace('.', ',') else formatElapsed(millis)

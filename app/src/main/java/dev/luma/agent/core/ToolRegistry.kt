@@ -200,6 +200,9 @@ object ToolRegistry {
         ToolSpec("describe_tool", "meta", "подробности инструмента: аргументы, результат, разрешения, доступность", listOf(a("name", ArgType.STRING, required = true, maxLength = 60)), "details", sideEffect = false, label = { "Уточняю инструмент ${it.s("name")}" }),
     )
     private val byName = specs.associateBy { it.name }
+    /** Tools that act on the screen or open another app: before the first of them the agent's overlay appears. */
+    fun controlsScreen(name: String): Boolean = byName[name]?.group in setOf("screen", "system") ||
+        name in setOf("open_app", "open_url", "open_settings", "show_alarms", "create_event")
     val names: Set<String> = byName.keys
     operator fun get(name: String): ToolSpec? = byName[name]
 

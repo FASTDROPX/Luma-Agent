@@ -167,6 +167,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         if (!cached.info.refresh() || !cached.info.isVisibleToUser || !cached.info.isEnabled || cached.info.isPassword || signature(cached.info) != cached.signature) throw UserError("Элемент изменился или недоступен. Обновите screen.")
         return cached.info
     }
+    override fun overlayReady(): Boolean = visuals?.stopButton != null
     override fun actionLabel(name: String, args: JSONObject): String {
         val target = args.optInt("node")
         val label = nodes[target]?.info?.let { it.text?.toString()?.takeIf(String::isNotBlank) ?: it.contentDescription?.toString() }.orEmpty().take(100)

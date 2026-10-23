@@ -112,7 +112,9 @@ import kotlin.math.roundToInt
     val lastFailed=messages.lastOrNull()?.takeIf {it.failed}?.id
     LaunchedEffect(lastFailed) {if(lastFailed!=null && System.currentTimeMillis()-(messages.lastOrNull()?.timestamp ?: 0)<5000) rootView.haptic(Haptic.Error,haptics)}
     val relevantRun=run.active && run.chatId==selected
-    val pending=busy && !run.active && messages.lastOrNull()?.role!="assistant"
+    // In agent mode the task looks like a chat reply until the agent actually does something.
+    val agentThinking=relevantRun && !run.acting && run.approval==null && !run.paused && !run.retryPending
+    val pending=(busy && !run.active && messages.lastOrNull()?.role!="assistant") || agentThinking
     val searching=settings.webSearch
     val chatStatus by graph.chatStatus.collectAsStateWithLifecycle()
     val latestAnswer=messages.lastOrNull {it.role=="assistant"}?.id
@@ -176,12 +178,12 @@ import kotlin.math.roundToInt
                     }
                     if(pending) item(key="thinking") {
                         Row(Modifier.animateItem(fadeInSpec=null,placementSpec=null,fadeOutSpec=null).fillMaxWidth().heightIn(min=48.dp).padding(start=52.dp).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+it.size.height/2f)},verticalAlignment=Alignment.CenterVertically) {
-                            val elapsed=rememberElapsed(chatStartedAt)
+                            val elapsed=rememberElapsed(if(agentThinking) run.startedAt else chatStartedAt)
                             Text(chatStatus ?: if(searching) "Ищу в интернете и готовлю ответ…" else "Готовлю ответ…",Modifier.weight(1f,fill=false),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
                             if(elapsed>=1000) Text("  ${dev.luma.agent.core.formatElapsed(elapsed)}",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f))
                         }
                     }
-                    if(relevantRun) item(key="agent") {
+                    if(relevantRun && !agentThinking) item(key="agent") {
                         Box(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(260),placementSpec=if(reduced) null else spring(stiffness=Spring.StiffnessMediumLow),fadeOutSpec=null)) {
                             RunCard(run,approve={rootView.haptic(Haptic.Confirm,settings.haptics);scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},elapsed=rememberElapsed(run.startedAt),stats=tokenStats.takeIf {settings.tokenMeter},meterActive=settings.tokenMeter,
                                 orbSlot=Modifier.onGloballyPositioned {c ->answer=c.positionInRoot()+Offset(c.size.width/2f,c.size.height/2f)-origin})

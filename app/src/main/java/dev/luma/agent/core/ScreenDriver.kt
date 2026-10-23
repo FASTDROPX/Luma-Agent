@@ -16,6 +16,8 @@ interface ScreenDriver {
     /** Why a step must wait for the user (a blocked word, a permission screen), or null. */
     fun sensitive(name: String, args: JSONObject, blockedWords: String): String?
     fun actionLabel(name: String, args: JSONObject): String
+    /** True once the agent's overlay (and its Stop pill) is on screen; screen actions wait for it. */
+    fun overlayReady(): Boolean = true
 }
 
 /** Web links written in an element's text, so the agent can open them with open_url instead of tapping a message. */

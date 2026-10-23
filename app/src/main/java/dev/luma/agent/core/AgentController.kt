@@ -97,6 +97,9 @@ class AgentController(private val context: Context, private val scope: Coroutine
                             is AgentReply.Final -> { chats.append(chat, "assistant", reply.text, reasoning = generation.reasoning, stats = generation.stats); update("Готово", step); return@withTimeout }
                             is AgentReply.Tool -> {
                                 val label = describe(reply)
+                                // The agent card appears with the first action; the overlay with the first one on the screen.
+                                if (!mutable.value.acting) mutable.value = mutable.value.copy(acting = true)
+                                if (ToolRegistry.controlsScreen(reply.name) && !mutable.value.screen) showOverlay()
                                 update(label, step)
                                 val invalid = try { ToolRegistry.validate(reply.name, reply.args); null } catch (e: ToolFailure) { e }
                                 val fingerprint = fingerprint(reply)
@@ -257,6 +260,13 @@ class AgentController(private val context: Context, private val scope: Coroutine
             .put("tools", org.json.JSONArray(ToolRegistry.names.sorted()))
         return spec.details().put("status", ToolStatus.DONE).put("availability", org.json.JSONArray(DeviceCapabilities.forTool(environment.capabilities, name).map {
             JSONObject().put("feature", it.feature).put("level", it.level).put("note", it.note) }))
+    }
+    /** Shows the cursor, glow and Stop pill and waits (up to 1.5 s) until Stop is on screen before the first screen action. */
+    private suspend fun showOverlay() {
+        mutable.value = mutable.value.copy(screen = true)
+        val driver = screen() ?: return
+        var waited = 0
+        while (!driver.overlayReady() && waited < 1500) { delay(16); waited += 16 }
     }
     private fun driver(): ScreenDriver = screen() ?: throw ToolFailure(ToolStatus.NEEDS_USER_ACTION, "Служба управления Luma выключена.",
         "Включите «Luma · управление телефоном» в специальных возможностях Android (Luma → «Доступ» → «Управление экраном»).", "accessibility")
