@@ -186,6 +186,8 @@ object ToolRegistry {
             listOf(a("query", ArgType.STRING, maxLength = 200), a("detailed", ArgType.BOOL), a("image", ArgType.BOOL, "JPEG, только если разрешено и модель с vision")),
             "snapshot, width, height, nodes", "Служба Luma", sideEffect = false, label = { "Читаю текущий экран" }),
         ToolSpec("tap", "screen", "нажать элемент из последнего screen", listOf(a("node", ArgType.INT, required = true), a("snapshot", ArgType.STRING)), "status, screen", screen = true),
+        ToolSpec("long_press", "screen", "долгое нажатие на элемент: меню действий (копировать, поделиться, открыть в браузере)",
+            listOf(a("node", ArgType.INT, required = true), a("snapshot", ArgType.STRING)), "status, screen", screen = true),
         ToolSpec("tap_point", "screen", "нажать точку; она должна попадать в элемент дерева или быть видна на снимке",
             listOf(a("x", ArgType.INT, required = true), a("y", ArgType.INT, required = true), a("snapshot", ArgType.STRING)), "status, screen", screen = true),
         ToolSpec("scroll", "screen", "прокрутить элемент", listOf(a("node", ArgType.INT, required = true), a("direction", ArgType.STRING, required = true, choices = listOf("down", "up")), a("snapshot", ArgType.STRING)), "status, screen", screen = true),

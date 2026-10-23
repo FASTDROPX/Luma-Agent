@@ -18,6 +18,13 @@ interface ScreenDriver {
     fun actionLabel(name: String, args: JSONObject): String
 }
 
+/** Web links written in an element's text, so the agent can open them with open_url instead of tapping a message. */
+object ScreenLinks {
+    private val link = Regex("""(?i)\b(?:https?://|www\.)[^\s<>"'«»]+""")
+    fun find(text: String): List<String> = link.findAll(text).map { it.value.trimEnd('.', ',', ';', ':', '!', '?', ')', ']', '…') }
+        .map { if (it.startsWith("www.", true)) "https://$it" else it }.filter { it.length in 11..2000 }.distinct().take(3).toList()
+}
+
 /** Standard gestures from the screen size alone: no screenshot, no vision, no guessed coordinates. */
 object Gestures {
     data class Stroke(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val durationMs: Long)

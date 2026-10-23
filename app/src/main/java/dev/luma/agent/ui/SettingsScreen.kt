@@ -160,6 +160,11 @@ import kotlin.math.roundToInt
                     TextButton(onClick=openAccess) {Icon(Icons.Outlined.Security,null);Spacer(Modifier.width(8.dp));Text("Разрешения и папка для файлов")}
                 } }
                 item { SoftCard {
+                    SettingToggle("Глубокие размышления","Если шаг не удался, агент разбирает почему и пробует другой способ, а не повторяет то же",settings.deepThinking) {v->graph.update {it.copy(deepThinking=v)}}
+                    Text("Пример: нажатие на ссылку в Telegram открыло меню сообщения — агент не жмёт снова, а открывает ссылку через браузер или копирует её. Каждый разбор — ещё один запрос к модели, до шести за задачу. То же действие на том же экране повторно не выполняется.",
+                        style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                } }
+                item { SoftCard {
                     Text("Вызов инструментов",style=MaterialTheme.typography.titleMedium)
                     val modes=listOf("auto" to "Авто","native" to "Функции","json" to "JSON")
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {

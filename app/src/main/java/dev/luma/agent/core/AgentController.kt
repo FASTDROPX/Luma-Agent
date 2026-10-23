@@ -43,6 +43,31 @@ class AgentController(private val context: Context, private val scope: Coroutine
                     val loopGuard = AgentLoopGuard()
                     // Hash of the latest screenshot: steps in apps without an element tree (games) are told apart by it.
                     var lastFrame: Long? = null
+                    // «Глубокие размышления»: what each screen action did on which screen; a failed or repeated step is analysed first.
+                    val deep = settings.deepThinking
+                    var screenKey: String? = null
+                    var screenHasNodes = false
+                    val attempted = mutableMapOf<String, String>()
+                    var reflections = 0
+                    suspend fun reflect(label: String, what: String, step: Int) {
+                        reflections++
+                        update("Размышляю, как сделать иначе", step)
+                        val started = android.os.SystemClock.elapsedRealtime()
+                        try {
+                            val generation = api.generateDetailed(settings.provider, connection,
+                                memory.turns(vault.state.value.screenshots) + Turn("user", Reflection.prompt(goal, label, what, memory.lessonList)),
+                                Reflection.system(settings.formal), agent = true)
+                            chats.addUsage(chat, generation.stats)
+                            mutable.value = mutable.value.copy(tokens = mutable.value.tokens + (generation.stats?.let { it.inputTokens + it.outputTokens } ?: 0))
+                            val analysis = Reflection.parse(generation.text)
+                            memory.lesson(analysis.lesson("$label ($what)"))
+                            val took = android.os.SystemClock.elapsedRealtime() - started
+                            val line = "Разбор: " + analysis.next.ifBlank { analysis.why }.ifBlank { "нужен другой способ" }.take(160)
+                            chats.append(chat, "tool", line + " · ${formatSeconds(took)}")
+                            mutable.value = mutable.value.copy(log = (mutable.value.log + StepLog(step, line, took, true, generation.stats?.outputPerSecond)).takeLast(200))
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { memory.lesson("Не сработало: $label ($what). Разбор не получился — выбери другой способ сам.") }
+                    }
                     // Gathered once: the prompt stays identical between steps, so providers can cache it.
                     val environment = withContext(Dispatchers.IO) { TaskEnvironment.capture(context, screen() != null, settings.folder) }
                     val modelKey = "${settings.provider}/${connection.model}"
@@ -76,17 +101,26 @@ class AgentController(private val context: Context, private val scope: Coroutine
                                 val invalid = try { ToolRegistry.validate(reply.name, reply.args); null } catch (e: ToolFailure) { e }
                                 val fingerprint = fingerprint(reply)
                                 val repeatUnknown = invalid == null && lastUnknown == fingerprint
-                                if (invalid == null) {
+                                val spec = ToolRegistry[reply.name]
+                                val tracked = deep && invalid == null && spec?.group == "screen" && spec.sideEffect
+                                val attemptKey = if (tracked && screenKey != null) "$fingerprint@$screenKey" else null
+                                val triedBefore = attemptKey?.let { attempted[it] }
+                                if (invalid == null && triedBefore == null) {
                                     val blocked = screen()?.sensitive(reply.name, reply.args, vault.state.value.blockedWords)
                                     if (repeatUnknown || AgentApprovalPolicy.requiresApproval(reply, vault.state.value.confirmActions, blocked != null)) {
                                         val details = confirmationDetails(reply) + blocked?.let { "\n$it" }.orEmpty() +
                                             if (repeatUnknown) "\nРезультат такого же предыдущего шага неизвестен: он мог уже выполниться. Повторить?" else ""
-                                        val accepted = requestApproval(Approval(label, details, ToolRegistry[reply.name]?.screen == true || reply.name in setOf("tap", "tap_point", "scroll", "swipe", "set_text")))
+                                        val accepted = requestApproval(Approval(label, details, ToolRegistry[reply.name]?.screen == true || reply.name in setOf("tap", "tap_point", "scroll", "swipe", "set_text", "long_press")))
                                         if (!accepted) { chats.append(chat, "assistant", "Действие отменено вами. Задача остановлена."); return@withTimeout }
                                     }
                                 }
                                 awaitRunning()
-                                val result = if (invalid != null) ToolResult(invalid.json()) else try {
+                                val result = if (triedBefore != null) {
+                                    // The same step on the same screen did not help before: think instead of repeating it.
+                                    if (reflections < MAX_REFLECTIONS) reflect(label, "уже пробовали на этом же экране, тогда: $triedBefore", step)
+                                    ToolResult(JSONObject().put("status", ToolStatus.ERROR).put("blocked", true)
+                                        .put("error", "Это действие уже пробовали на этом же экране ($triedBefore) — повтор не поможет. Выбери другой способ (см. lessons)."))
+                                } else if (invalid != null) ToolResult(invalid.json()) else try {
                                     when (reply.name) {
                                         "remember" -> { memory.remember(reply.args.requiredString("notes", 4000)); ToolResult(JSONObject().put("status", ToolStatus.DONE).put("saved", true)) }
                                         "describe_tool" -> ToolResult(describeTool(reply.args.getString("name"), environment))
@@ -114,6 +148,15 @@ class AgentController(private val context: Context, private val scope: Coroutine
                                     update("Нужна рабочая папка", step); return@withTimeout
                                 }
                                 result.frame?.let { lastFrame = it }
+                                val after = screenKeyOf(result.json, lastFrame)
+                                if (tracked && triedBefore == null) {
+                                    val unchanged = screenKey != null && after?.first == screenKey && screenHasNodes
+                                    val failed = unchanged || status !in setOf(ToolStatus.DONE, ToolStatus.NEEDS_CONFIRMATION, ToolStatus.NEEDS_USER_ACTION)
+                                    val what = if (unchanged) "экран не изменился" else outcome(status, result.json) + if (after != null && after.first != screenKey) ", экран сменился" else ""
+                                    attemptKey?.let { attempted[it] = what }
+                                    if (failed && reflections < MAX_REFLECTIONS) reflect(label, what, step)
+                                }
+                                after?.let { screenKey = it.first; screenHasNodes = it.second }
                                 if (reply.name != "remember" && loopGuard.repeated(reply, result.json, lastFrame)) {
                                     mutable.value = mutable.value.copy(paused = true, stage = "Повторяются одинаковые шаги без изменений. Агент на паузе, чтобы сохранить квоту. Можно продолжить или остановить задачу.")
                                 }
@@ -174,7 +217,21 @@ class AgentController(private val context: Context, private val scope: Coroutine
         val decision = CompletableDeferred<Boolean>(); approval = decision; mutable.value = mutable.value.copy(approval = value)
         return try { decision.await() } finally { approval = null; mutable.value = mutable.value.copy(approval = null) }
     }
+    private companion object {
+        /** Analyses per task in the deep thinking mode; each is one extra model request. */
+        const val MAX_REFLECTIONS = 6
+    }
     private data class ToolResult(val json: JSONObject, val image: String? = null, val frame: Long? = null)
+    /**
+     * The screen a result shows, as a short key, and whether it has elements. Without elements (games) the screenshot
+     * hash tells screens apart. Null when the result carries no screen.
+     */
+    private fun screenKeyOf(json: JSONObject, frame: Long?): Pair<String, Boolean>? {
+        val screen = if (json.has("nodes")) json else json.optJSONObject("screen") ?: return null
+        val nodes = screen.optJSONArray("nodes") ?: return null
+        val key = screen.optString("package") + stableJson(nodes) + if (nodes.length() == 0) "|$frame" else ""
+        return key.hashCode().toString() to (nodes.length() > 0)
+    }
     /** Gemini models point in 0–1000 of the picture's width and height, also through OpenRouter; others in pixels. */
     private fun grid(): Int {
         val settings = vault.state.value
@@ -236,7 +293,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
         return ToolResult(result)
     }
     private fun describe(tool: AgentReply.Tool): String = when (tool.name) {
-        "tap", "tap_point", "scroll", "swipe", "set_text" -> screen()?.actionLabel(tool.name, tool.args) ?: tool.message.ifBlank { "Действие на экране" }
+        "tap", "tap_point", "scroll", "swipe", "set_text", "long_press" -> screen()?.actionLabel(tool.name, tool.args) ?: tool.message.ifBlank { "Действие на экране" }
         else -> if (tool.name in ToolRegistry.names) ToolRegistry.label(tool.name, tool.args) else tool.message.ifBlank { tool.name.take(40) }
     }
     private fun confirmationDetails(tool: AgentReply.Tool): String = when (tool.name) {

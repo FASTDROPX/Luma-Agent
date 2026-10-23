@@ -17,6 +17,7 @@ import dev.luma.agent.core.BlockedWords
 import dev.luma.agent.core.FrameHash
 import dev.luma.agent.core.Gestures
 import dev.luma.agent.core.ScreenDriver
+import dev.luma.agent.core.ScreenLinks
 import dev.luma.agent.core.ScreenResult
 import dev.luma.agent.core.ToolFailure
 import dev.luma.agent.core.ToolStatus
@@ -126,7 +127,10 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                 val id = nodes.size + 1; nodes[id] = Node(AccessibilityNodeInfo.obtain(node), signature(node))
                 items.put(JSONObject().put("id", id).put("text", text).put("description", description)
                     .put("bounds", JSONArray(listOf(scaledX(rect.left), scaledY(rect.top), scaledX(rect.right), scaledY(rect.bottom))))
-                    .put("clickable", node.isClickable).put("editable", node.isEditable).put("scrollable", node.isScrollable).put("enabled", node.isEnabled))
+                    .put("clickable", node.isClickable).put("editable", node.isEditable).put("scrollable", node.isScrollable).put("enabled", node.isEnabled)
+                    .apply { if (node.isLongClickable) put("longClickable", true) }
+                    // A link inside a message is not a node of its own; tapping the message often opens its menu instead.
+                    .apply { ScreenLinks.find(text + " " + description).takeIf { it.isNotEmpty() }?.let { put("links", JSONArray(it)) } })
                 characters += text.length + description.length
             }
             for (i in 0 until node.childCount) { val child = node.getChild(i) ?: continue; try { visit(child, depth + 1) } finally { child.recycle() } }
@@ -168,6 +172,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         val label = nodes[target]?.info?.let { it.text?.toString()?.takeIf(String::isNotBlank) ?: it.contentDescription?.toString() }.orEmpty().take(100)
         return when (name) {
             "tap" -> "Нажать: ${label.ifBlank { "элемент $target" }}"
+            "long_press" -> "Долгое нажатие: ${label.ifBlank { "элемент $target" }}"
             "set_text" -> "Ввести в «${label.ifBlank { "поле $target" }}»: ${args.optString("text").take(160)}"
             "tap_point" -> textAtPoint(args)?.let { "Нажать: ${it.take(100)} (точка ${args.optInt("x")}, ${args.optInt("y")})" }
                 ?: "Нажать точку ${args.optInt("x")}, ${args.optInt("y")}"
@@ -191,7 +196,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
     }
     /** Returns why a step needs the user's confirmation, or null. Words come only from the user's own list. */
     override fun sensitive(name: String, args: JSONObject, blockedWords: String): String? {
-        if (name !in setOf("tap", "tap_point", "set_text")) return null
+        if (name !in setOf("tap", "tap_point", "set_text", "long_press")) return null
         if (permissionScreen(snapshotPackage)) return "Системный экран разрешений Android."
         return BlockedWords.match(blockedWords, actionLabel(name, args))?.let { "Совпало запрещённое слово «$it»." }
     }
@@ -218,7 +223,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
     override suspend fun execute(name: String, args: JSONObject): JSONObject = withContext(Dispatchers.Main.immediate) {
         if (!(name == "global_action" && args.optString("action") == "lock_screen")) unlocked()
         graph.agent.awaitAction()
-        if (name in setOf("tap", "tap_point", "set_text", "swipe") && permissionScreen(snapshotPackage)) throw ToolFailure(ToolStatus.DENIED, "Системное разрешение нужно подтвердить вручную в Android.")
+        if (name in setOf("tap", "tap_point", "set_text", "swipe", "long_press") && permissionScreen(snapshotPackage)) throw ToolFailure(ToolStatus.DENIED, "Системное разрешение нужно подтвердить вручную в Android.")
         if (name == "swipe_screen" && permissionScreen(currentPackage())) throw ToolFailure(ToolStatus.DENIED, "На экране системного разрешения жесты агента запрещены. Подтвердите или отклоните его вручную.")
         when (name) {
             "open_notifications" -> return@withContext global(GLOBAL_ACTION_NOTIFICATIONS, .5f, "шторка уведомлений") { systemPanelShown() }
@@ -248,6 +253,16 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
             "tap" -> {
                 pointAtNode(args)
                 if (!click(node(args))) throw UserError("Элемент не поддерживает нажатие. Обновите экран.")
+                visuals?.pulse()
+            }
+            "long_press" -> {
+                pointAtNode(args)
+                val target = node(args)
+                if (!longClick(target)) {
+                    // No long-click action: hold a finger on the element's centre instead.
+                    val rect = Rect(); target.getBoundsInScreen(rect)
+                    gesture(rect.exactCenterX(), rect.exactCenterY(), rect.exactCenterX(), rect.exactCenterY(), 800) { graph.agent.awaitAction(); validateSnapshot(args) }
+                }
                 visuals?.pulse()
             }
             "set_text" -> {
@@ -374,6 +389,15 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         } finally { panel?.temporarilyHide(false) }
     }
     /** A label is often not clickable itself; like a finger, the tap lands on its nearest clickable container. */
+    private fun longClick(target: AccessibilityNodeInfo): Boolean {
+        var current: AccessibilityNodeInfo? = target
+        repeat(7) {
+            val node = current ?: return false
+            if (node.isLongClickable && node.isEnabled && node.isVisibleToUser && node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)) return true
+            current = node.parent
+        }
+        return false
+    }
     private fun click(target: AccessibilityNodeInfo): Boolean {
         if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
         var current: AccessibilityNodeInfo? = target.parent

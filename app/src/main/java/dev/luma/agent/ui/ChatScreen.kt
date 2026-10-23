@@ -219,12 +219,17 @@ import kotlin.math.roundToInt
             color=MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=.76f),shadowElevation=6.dp,
             border=BorderStroke(.8.dp,MaterialTheme.colorScheme.outlineVariant.copy(alpha=.35f))) {
             Column(Modifier.padding(horizontal=10.dp,vertical=6.dp).testTag("chat-composer")) {
-                Row(Modifier.padding(start=4.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
+                Row(Modifier.padding(start=4.dp),verticalAlignment=Alignment.CenterVertically) {
+                  // The chips scroll sideways on a narrow screen; the access button stays at the end.
+                  Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
                     FilterChip(!asAgent,{graph.setAgentMode(false)},label={Text("Чат")},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(15.dp))})
                     FilterChip(asAgent,{graph.setAgentMode(true)},label={Text("Агент")},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(15.dp))})
                     // Web search for chat replies: the provider's own, or through Luma for any model.
+                    // «Глубокие размышления»: after a failed step the agent analyses it and tries another way.
+                    if(asAgent) FilterChip(settings.deepThinking,{graph.update {it.copy(deepThinking=!it.deepThinking)}},label={Text("Размышления")},
+                        leadingIcon={Icon(Icons.Outlined.Psychology,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-deep-thinking"))
                     if(!asAgent) FilterChip(searching,{graph.update {it.copy(webSearch=!it.webSearch)}},label={Text("Поиск")},leadingIcon={Icon(Icons.Outlined.TravelExplore,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-web-search"))
-                    Spacer(Modifier.weight(1f))
+                  }
                     if(asAgent) IconButton(onClick=openAccess) {Icon(Icons.Outlined.Security,"Доступ агента",Modifier.size(20.dp))}
                 }
                 if(files.isNotEmpty()) AttachmentStrip(files,graph.chats.attachments) {file ->
