@@ -77,7 +77,9 @@ internal class AgentVisualOverlay(private val service: AgentAccessibilityService
     fun bind() {
         scope.launch {combine(controller.state,graph.vault.state) {run,s->run to s}.collect {(run,s)->
             current=run;settings=s
-            if(!run.active) leave() else {
+            if(!run.active) {leave();if(canvas==null) graph.takeOrbHandoff()}
+            // A task that only thinks, answers or uses direct tools never shows the overlay.
+            else if(run.screen) {
                 leavingCanvas?.let {finishLeaving(it)}
                 if(canvas==null && stopButton==null) show()
                 canvas?.configure(run,s)

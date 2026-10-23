@@ -41,7 +41,6 @@ import dev.luma.agent.core.AttachmentStore
 import dev.luma.agent.core.safeError
 import dev.luma.agent.core.ChatMessage
 import dev.luma.agent.core.RunState
-import dev.luma.agent.core.WebSearch
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlin.math.roundToInt
@@ -98,6 +97,18 @@ import kotlin.math.roundToInt
         }
     }
     val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) {importUris(it)}
+    // «Выдайте доступ» card: a runtime permission goes through Android's dialog; a special access opens its settings screen.
+    val permissionLauncher=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {graph.agent.resumeAccess()}
+    fun grantAccess(need: dev.luma.agent.core.PermissionNeed) {
+        if(need.runtime.isNotEmpty()) permissionLauncher.launch(need.runtime.toTypedArray())
+        else {dev.luma.agent.core.BackgroundAccess.open(context,dev.luma.agent.core.OptionalAccess.item(need.id)?.screens(context) ?: dev.luma.agent.core.OptionalAccess.appDetails(context))}
+    }
+    // Coming back from a settings screen (special access): re-check whether it is now on.
+    val lifecycleOwner=androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer=androidx.lifecycle.LifecycleEventObserver {_,event->if(event==androidx.lifecycle.Lifecycle.Event.ON_RESUME && graph.agent.state.value.permission?.runtime?.isEmpty()==true) graph.agent.resumeAccess()}
+        lifecycleOwner.lifecycle.addObserver(observer);onDispose {lifecycleOwner.lifecycle.removeObserver(observer)}
+    }
     // Share → Luma: the text goes into the field, files and pictures become attachments.
     LaunchedEffect(shared,selected) {
         val content=shared ?: return@LaunchedEffect
@@ -113,8 +124,11 @@ import kotlin.math.roundToInt
     val lastFailed=messages.lastOrNull()?.takeIf {it.failed}?.id
     LaunchedEffect(lastFailed) {if(lastFailed!=null && System.currentTimeMillis()-(messages.lastOrNull()?.timestamp ?: 0)<5000) rootView.haptic(Haptic.Error,haptics)}
     val relevantRun=run.active && run.chatId==selected
-    val pending=busy && !run.active && messages.lastOrNull()?.role!="assistant"
-    val searching=settings.webSearch && WebSearch.supported(settings.provider)
+    // In agent mode the task looks like a chat reply until the agent actually does something.
+    val agentThinking=relevantRun && !run.acting && run.approval==null && run.permission==null && !run.paused && !run.retryPending
+    val pending=(busy && !run.active && messages.lastOrNull()?.role!="assistant") || agentThinking
+    val searching=settings.webSearch
+    val chatStatus by graph.chatStatus.collectAsStateWithLifecycle()
     val latestAnswer=messages.lastOrNull {it.role=="assistant"}?.id
     var origin by remember {mutableStateOf(Offset.Zero)}
     var home by remember {mutableStateOf(Offset.Unspecified)}
@@ -176,14 +190,14 @@ import kotlin.math.roundToInt
                     }
                     if(pending) item(key="thinking") {
                         Row(Modifier.animateItem(fadeInSpec=null,placementSpec=null,fadeOutSpec=null).fillMaxWidth().heightIn(min=48.dp).padding(start=52.dp).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+it.size.height/2f)},verticalAlignment=Alignment.CenterVertically) {
-                            val elapsed=rememberElapsed(chatStartedAt)
-                            Text(if(searching) "Ищу в интернете и готовлю ответ…" else "Готовлю ответ…",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            val elapsed=rememberElapsed(if(agentThinking) run.startedAt else chatStartedAt)
+                            Text(chatStatus ?: if(searching) "Ищу в интернете и готовлю ответ…" else "Готовлю ответ…",Modifier.weight(1f,fill=false),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
                             if(elapsed>=1000) Text("  ${dev.luma.agent.core.formatElapsed(elapsed)}",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f))
                         }
                     }
-                    if(relevantRun) item(key="agent") {
+                    if(relevantRun && !agentThinking) item(key="agent") {
                         Box(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(260),placementSpec=if(reduced) null else spring(stiffness=Spring.StiffnessMediumLow),fadeOutSpec=null)) {
-                            RunCard(run,approve={rootView.haptic(Haptic.Confirm,settings.haptics);scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},elapsed=rememberElapsed(run.startedAt),stats=tokenStats.takeIf {settings.tokenMeter},meterActive=settings.tokenMeter,
+                            RunCard(run,approve={rootView.haptic(Haptic.Confirm,settings.haptics);scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},grantAccess=::grantAccess,skipAccess={graph.agent.resumeAccess()},elapsed=rememberElapsed(run.startedAt),stats=tokenStats.takeIf {settings.tokenMeter},meterActive=settings.tokenMeter,
                                 orbSlot=Modifier.onGloballyPositioned {c ->answer=c.positionInRoot()+Offset(c.size.width/2f,c.size.height/2f)-origin})
                         }
                     }
@@ -219,15 +233,17 @@ import kotlin.math.roundToInt
             color=MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=.76f),shadowElevation=6.dp,
             border=BorderStroke(.8.dp,MaterialTheme.colorScheme.outlineVariant.copy(alpha=.35f))) {
             Column(Modifier.padding(horizontal=10.dp,vertical=6.dp).testTag("chat-composer")) {
-                Row(Modifier.padding(start=4.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
+                Row(Modifier.padding(start=4.dp),verticalAlignment=Alignment.CenterVertically) {
+                  // The chips scroll sideways on a narrow screen; the access button stays at the end.
+                  Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
                     FilterChip(!asAgent,{graph.setAgentMode(false)},label={Text("Чат")},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(15.dp))})
                     FilterChip(asAgent,{graph.setAgentMode(true)},label={Text("Агент")},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(15.dp))})
-                    // Web search for chat replies; DeepSeek's API and local servers have none.
-                    if(!asAgent) FilterChip(searching,{
-                        if(WebSearch.supported(settings.provider)) graph.update {it.copy(webSearch=!it.webSearch)}
-                        else graph.uiMessage.value="У провайдера ${settings.provider.label} нет поиска в интернете через API. Он есть у Gemini, Claude, OpenAI и OpenRouter."
-                    },label={Text("Поиск")},leadingIcon={Icon(Icons.Outlined.TravelExplore,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-web-search"))
-                    Spacer(Modifier.weight(1f))
+                    // Web search for chat replies: the provider's own, or through Luma for any model.
+                    // «Глубокие размышления»: after a failed step the agent analyses it and tries another way.
+                    if(asAgent) FilterChip(settings.deepThinking,{graph.update {it.copy(deepThinking=!it.deepThinking)}},label={Text("Размышления")},
+                        leadingIcon={Icon(Icons.Outlined.Psychology,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-deep-thinking"))
+                    if(!asAgent) FilterChip(searching,{graph.update {it.copy(webSearch=!it.webSearch)}},label={Text("Поиск")},leadingIcon={Icon(Icons.Outlined.TravelExplore,null,Modifier.size(15.dp))},modifier=Modifier.testTag("chat-web-search"))
+                  }
                     if(asAgent) IconButton(onClick=openAccess) {Icon(Icons.Outlined.Security,"Доступ агента",Modifier.size(20.dp))}
                 }
                 if(files.isNotEmpty()) AttachmentStrip(files,graph.chats.attachments) {file ->
@@ -337,20 +353,29 @@ import kotlin.math.roundToInt
 }
 @Composable fun Thinking(label: String) {Text(label,Modifier.padding(8.dp),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)}
 @Composable fun RunCard(run: RunState, approve: () -> Unit, reject: () -> Unit, pause: () -> Unit, stop: () -> Unit, maxSteps: Int = 20,retry: ()->Unit={},
+    grantAccess: (dev.luma.agent.core.PermissionNeed)->Unit={}, skipAccess: ()->Unit={},
     elapsed: Long = 0, stats: dev.luma.agent.core.TokenStats? = null, meterActive: Boolean = false, orbSlot: Modifier = Modifier) {
     SoftCard(Modifier.animateContentSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // The chat orb (44 dp) is drawn over this slot, so it and its particles stay inside the card.
             Spacer(orbSlot.size(44.dp))
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) { Text(if (run.approval != null) "Нужно подтверждение" else if (run.paused) "Агент на паузе" else "Luma работает", style = MaterialTheme.typography.titleSmall); Text((if(maxSteps==0) "Шаг ${run.step} · без лимита" else "Шаг ${run.step} из $maxSteps") + " · ${dev.luma.agent.core.formatElapsed(elapsed)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("run-timer"))
+            Column(Modifier.weight(1f)) { Text(if (run.permission != null) "Нужен доступ" else if (run.approval != null) "Нужно подтверждение" else if (run.paused) "Агент на паузе" else "Luma работает", style = MaterialTheme.typography.titleSmall); Text((if(maxSteps==0) "Шаг ${run.step} · без лимита" else "Шаг ${run.step} из $maxSteps") + " · ${dev.luma.agent.core.formatElapsed(elapsed)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("run-timer"))
                 if (meterActive) TokenMeter(stats, run.active && run.approval == null && !run.paused, Modifier.offset(x = (-6).dp)) }
             IconButton(onClick = stop) { Icon(Icons.Outlined.StopCircle, "Остановить") }
         }
         AnimatedContent(run.approval?.title ?: run.stage, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(120)) }, label = "run stage") { stage ->
             Text(t(stage), style = MaterialTheme.typography.bodyMedium)
         }
-        if (run.approval == null) RunLog(run.log)
+        if (run.approval == null && run.permission == null) RunLog(run.log)
+        run.permission?.let { need ->
+            Text(need.purpose, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Без доступа «${need.title}» этот шаг не выполнить. Выдайте его, чтобы Luma продолжила, или пропустите.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { grantAccess(need) }, modifier = Modifier.weight(1f).testTag("grant-access")) { Icon(Icons.Outlined.LockOpen, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Выдать доступ") }
+                OutlinedButton(onClick = skipAccess, modifier = Modifier.weight(1f)) { Text("Пропустить") }
+            }
+        }
         run.approval?.let { approval ->
             Text(t(approval.details), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (approval.background) Text("После разрешения Luma свернётся и продолжит действие в предыдущем приложении.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

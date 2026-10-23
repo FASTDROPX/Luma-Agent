@@ -33,7 +33,7 @@ class OverlayTest {
         graph.vault.saveModels(Provider.GEMINI,graph.vault.state.value.connection(),listOf(ModelInfo("gemini-test")))
         graph.vault.selectModel(Provider.GEMINI,"gemini-test")
         graph.vault.update {it.copy(panel=false,visuals=it.visuals.copy(cursor=false,edgeGlow=false))}
-        val api=ProviderClient {JSONObject("""{"candidates":[{"content":{"parts":[{"text":"{\"type\":\"tool\",\"tool\":\"delete_file\",\"args\":{\"path\":\"x.txt\"}}"}]}}]}""")}
+        val api=ProviderClient {JSONObject("""{"candidates":[{"content":{"parts":[{"text":"{\"type\":\"tool\",\"tool\":\"tap\",\"args\":{\"node\":1}}"}]}}]}""")}
         val jobScope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
         val controller=AgentController(app,jobScope,graph.vault,graph.chats,api)
         val done=CompletableDeferred<Unit>()

@@ -85,8 +85,11 @@ data class AppSettings(
     val tone: String = "friendly",
     /** How the agent calls tools: "auto" (native function calling, JSON commands if the server rejects it), "native" or "json". */
     val toolCalling: String = "auto",
-    /** Chat replies may search the web, where the provider's API offers it. */
-    val webSearch: Boolean = false
+    /** Chat replies may search the web: through the provider's own search or through Luma ([search]). */
+    val webSearch: Boolean = false,
+    val search: WebSearchSettings = WebSearchSettings(),
+    /** «Глубокие размышления»: the agent analyses a failed step and tries another way instead of repeating it. */
+    val deepThinking: Boolean = false
 ) {
     val formal: Boolean get() = tone == "formal"
     fun connection(p: Provider = provider) = connections[p] ?: Connection()
@@ -103,7 +106,7 @@ data class AppSettings(
             .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
             .put("maxSteps",maxSteps.coerceIn(5,30)).put("taskMinutes",taskMinutes.coerceIn(2,15)).put("unlimitedAgent", unlimitedAgent)
             .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH)).put("tokenMeter", tokenMeter)
-            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch)
+            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch).put("search", search.json()).put("deepThinking", deepThinking)
     }
     companion object {
         fun parse(json: JSONObject): AppSettings {
@@ -122,7 +125,7 @@ data class AppSettings(
                 json.optString("blockedWords").take(BlockedWords.MAX_LENGTH), json.optBoolean("tokenMeter", true),
                 json.optDouble("chatTextScale", 1.0).toFloat().let { if (it.isFinite()) it.coerceIn(.85f, 1.4f) else 1f }, json.optBoolean("haptics", true),
                 json.optInt("agentTokenLimit", 0).coerceIn(0, 5000), json.optString("tone", "friendly").takeIf { it in listOf("friendly", "formal") } ?: "friendly",
-                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"))
+                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"), WebSearchSettings.parse(json.optJSONObject("search")), json.optBoolean("deepThinking"))
         }
     }
 }
@@ -145,6 +148,8 @@ data class ChatMessage(val id: Long, val role: String, val text: String, val tim
     val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false, val search: WebSearch? = null)
 data class Conversation(val id: Long, val title: String, val updated: Long, val pinned: Boolean = false, val agent: Boolean = false)
 data class Approval(val title: String, val details: String, val background: Boolean = false)
+/** An access a tool needs that is off: the chat shows a «выдайте доступ» card, and the task continues once it is granted. */
+data class PermissionNeed(val id: String, val title: String, val purpose: String, val runtime: List<String> = emptyList())
 data class RunState(val active: Boolean = false, val paused: Boolean = false, val stage: String = "", val step: Int = 0,
     val chatId: Long = 0, val approval: Approval? = null, val error: String? = null, val retryPending: Boolean = false,
     /** SystemClock.elapsedRealtime() when the task started; drives the run timer. */
@@ -152,7 +157,13 @@ data class RunState(val active: Boolean = false, val paused: Boolean = false, va
     /** Steps of this task, newest last, for the expandable log in the agent card. */
     val log: List<StepLog> = emptyList(),
     /** Tokens (prompt + reply) this task has spent so far. */
-    val tokens: Long = 0)
+    val tokens: Long = 0,
+    /** The agent has started acting (its first tool); until then the chat shows a plain «thinking» line, not the agent card. */
+    val acting: Boolean = false,
+    /** The task controls the screen or leaves Luma: only then the cursor, glow, Stop pill and floating panel appear. */
+    val screen: Boolean = false,
+    /** An access the current step needs that is off; the chat shows a card to grant it. */
+    val permission: PermissionNeed? = null)
 /** One agent step: what it did, how long the model and the action took, and whether it worked. */
 data class StepLog(val number: Int, val label: String, val millis: Long, val ok: Boolean, val outputPerSecond: Double? = null)
 fun formatSeconds(millis: Long): String = if (millis < 60_000) "%.1f с".format(java.util.Locale.ROOT, millis / 1000.0).replace('.', ',') else formatElapsed(millis)

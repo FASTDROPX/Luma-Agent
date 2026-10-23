@@ -67,7 +67,10 @@ object DeviceCapabilities {
             Entry("буфер обмена: чтение", if (sdk >= 29) UNAVAILABLE else DIRECT, listOf("clipboard"), if (sdk >= 29) "Android 10+ даёт читать буфер только приложению на экране" else ""),
             Entry("файлы workspace:/", when { !workspace.usable -> UNAVAILABLE; workspace.canWrite -> DIRECT; else -> SETTINGS }, listOf("write_text", "read_text", "list_files"),
                 when (workspace.status) { WorkspaceInfo.NOT_SELECTED -> "папка не выбрана"; WorkspaceInfo.LOST -> "доступ потерян"; WorkspaceInfo.READ_ONLY -> "только чтение"; else -> "" }),
-            Entry("управление экраном (запасной путь)", service, listOf("screen", "tap", "set_text", "scroll", "swipe", "tap_point"), if (screen) "" else "служба Luma выключена"),
+            Entry("управление экраном (запасной путь)", service, listOf("screen", "tap", "long_press", "set_text", "scroll", "swipe", "tap_point"), if (screen) "" else "служба Luma выключена"),
+            Entry("контакты, звонки, SMS, журнал звонков, местоположение, календарь, медиатека, статистика приложений", CONFIRM,
+                listOf("find_contacts", "call_number", "send_sms", "read_sms", "read_call_log", "get_location", "list_calendar", "list_media", "app_usage"),
+                "у каждого свой доступ — Luma попросит выдать его в чате; звонок и SMS подтверждаешь отдельно"),
         )
     }
     fun prompt(entries: List<Entry>): String {

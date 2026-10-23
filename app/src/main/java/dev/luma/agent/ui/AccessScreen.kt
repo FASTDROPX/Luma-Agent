@@ -55,7 +55,6 @@ import dev.luma.agent.*
     val workspace by produceState(dev.luma.agent.core.WorkspaceInfo(if (settings.folder.isBlank()) dev.luma.agent.core.WorkspaceInfo.NOT_SELECTED else dev.luma.agent.core.WorkspaceInfo.READY), settings.folder, resumed) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { dev.luma.agent.core.Workspace.describe(context, settings.folder) }
     }
-    val nearby = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed -> resumed++; if (!allowed) graph.uiMessage.value = "Без «Устройств поблизости» Luma открывает настройки Bluetooth" }
     val notification = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed -> notificationsAllowed = allowed; graph.uiMessage.value = if (allowed) "Уведомления включены" else "Остановить агента можно в приложении и панели" }
     val requestNotification: () -> Unit = {
         if (notificationsAllowed) context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) else notification.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -101,10 +100,8 @@ import dev.luma.agent.*
                 OutlinedButton(onClick = addTile, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.DashboardCustomize, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Добавить плитку") }
             }
         }
-        item { SystemActionsCard(context, resumed, nearby = { nearby.launch(Manifest.permission.BLUETOOTH_CONNECT) }) }
-        if (Build.VERSION.SDK_INT >= 33) item {
-            AccessCard(Icons.Outlined.NotificationsNone, "Уведомление о работе", "Статус задачи и остановка из шторки", notificationsAllowed, if (notificationsAllowed) "Настройки уведомлений" else "Разрешить уведомления", requestNotification)
-        }
+        // Notifications, special permissions, background work and everything else Android offers: one collapsible card.
+        item { OptionalAccessSection(graph, resumed) { resumed++ } }
         item {
             Text("Служба не записывает экран, пока нет запущенной задачи. Защищённые окна Android и парольные поля недоступны агенту.", Modifier.padding(4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -156,25 +153,6 @@ import dev.luma.agent.*
     }, confirmButton = { TextButton(onClick = { options = false }) { Text("Готово") } })
 }
 
-/** Special permissions some direct actions need. Each one is granted by the user on a system screen, never by the agent. */
-@Composable private fun SystemActionsCard(context: android.content.Context, resumed: Int, nearby: () -> Unit) {
-    val pkg = Uri.fromParts("package", context.packageName, null)
-    fun open(intent: Intent) { runCatching { context.startActivity(intent) } }
-    val write = remember(resumed) { Settings.System.canWrite(context) }
-    val dnd = remember(resumed) { context.getSystemService(android.app.NotificationManager::class.java).isNotificationPolicyAccessGranted }
-    val bluetooth = remember(resumed) { Build.VERSION.SDK_INT < 31 || androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED }
-    val exact = remember(resumed) { Build.VERSION.SDK_INT < 31 || context.getSystemService(android.app.AlarmManager::class.java).canScheduleExactAlarms() }
-    SoftCard {
-        Text("Системные действия", style = MaterialTheme.typography.titleMedium)
-        Text("Фонарик, громкость, медиа, будильники, ссылки и шторка работают без них. Эти разрешения нужны отдельным действиям; Android спрашивает о каждом сам.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        PermissionRow(Icons.Outlined.BrightnessMedium, "Изменение системных настроек", if (write) "Разрешено: яркость и автоповорот" else "Для яркости и автоповорота", write, "system-write-settings") { open(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, pkg)) }
-        PermissionRow(Icons.Outlined.DoNotDisturbOn, "«Не беспокоить»", if (dnd) "Разрешено" else "Для режима «Не беспокоить» и звонка в нём", dnd, "system-dnd") { open(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
-        if (Build.VERSION.SDK_INT >= 31) PermissionRow(Icons.Outlined.Bluetooth, "Устройства поблизости", if (bluetooth) "Разрешено: запрос на включение Bluetooth" else "Чтобы включать Bluetooth одним подтверждением", bluetooth, "system-nearby", nearby)
-        if (Build.VERSION.SDK_INT >= 31) PermissionRow(Icons.Outlined.Alarm, "Будильники и напоминания", if (exact) "Напоминания Luma точно в срок" else "Без него напоминание может прийти с опозданием до 10 минут", exact, "system-exact-alarms") {
-            open(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pkg)) }
-        Text("Wi‑Fi, мобильный интернет и NFC Android 10+ переключает только в своей панели; геолокацию, авиарежим и точку доступа — только в настройках. Luma откроет нужное место, а переключите вы.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
 @Composable private fun PermissionRow(icon: ImageVector, title: String, subtitle: String, granted: Boolean, tag: String, click: () -> Unit) {
     Surface(onClick = click, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth().testTag(tag)) {
         Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {

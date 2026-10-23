@@ -16,6 +16,15 @@ interface ScreenDriver {
     /** Why a step must wait for the user (a blocked word, a permission screen), or null. */
     fun sensitive(name: String, args: JSONObject, blockedWords: String): String?
     fun actionLabel(name: String, args: JSONObject): String
+    /** True once the agent's overlay (and its Stop pill) is on screen; screen actions wait for it. */
+    fun overlayReady(): Boolean = true
+}
+
+/** Web links written in an element's text, so the agent can open them with open_url instead of tapping a message. */
+object ScreenLinks {
+    private val link = Regex("""(?i)\b(?:https?://|www\.)[^\s<>"'«»]+""")
+    fun find(text: String): List<String> = link.findAll(text).map { it.value.trimEnd('.', ',', ';', ':', '!', '?', ')', ']', '…') }
+        .map { if (it.startsWith("www.", true)) "https://$it" else it }.filter { it.length in 11..2000 }.distinct().take(3).toList()
 }
 
 /** Standard gestures from the screen size alone: no screenshot, no vision, no guessed coordinates. */
