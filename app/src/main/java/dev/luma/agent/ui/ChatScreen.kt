@@ -45,11 +45,13 @@ import dev.luma.agent.core.ChatMessage
 import dev.luma.agent.core.RunState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.roundToInt
 
 @Composable fun ChatScreen(graph: AppGraph,openConnections: ()->Unit,openAccess: ()->Unit) {
     val settings by graph.vault.state.collectAsStateWithLifecycle()
-    val speech by graph.voice.state.collectAsStateWithLifecycle()
+    val speakingId by remember(graph) {graph.voice.state.map {it.speakingId}.distinctUntilChanged()}.collectAsStateWithLifecycle(initialValue=null)
     val messages by graph.chats.messages.collectAsStateWithLifecycle()
     val selected by graph.chats.selected.collectAsStateWithLifecycle()
     val busy by graph.chatBusy.collectAsStateWithLifecycle()
@@ -246,7 +248,7 @@ import kotlin.math.roundToInt
                                 repeat=if(message.role=="user" && idle) {{if(graph.send(message.text,false,message.attachments)) {follow=true;rootView.haptic(Haptic.Send,settings.haptics)}}} else null,
                                 regenerate=if(message.role=="assistant" && !message.failed && message.id==latestAnswer && idle) {{graph.regenerate(chat,message.id)}} else null)
                             val retry=if(message.failed && message.id==messages.lastOrNull()?.id && idle && chat!=null) {{graph.regenerate(chat,message.id)}} else null
-                            MessageBubble(message,animate,graph.chats.attachments,actions,retry,onCursor={y->if(message.id==latestAnswer && !pending && !relevantRun) answer=Offset(left,y-origin.y)},onGrowth={scrollEvents.trySend(Unit)},speak={graph.voice.read(message.id,message.text)},speaking=speech.speakingId==message.id)
+                            MessageBubble(message,animate,graph.chats.attachments,actions,retry,onCursor={y->if(message.id==latestAnswer && !pending && !relevantRun) answer=Offset(left,y-origin.y)},onGrowth={scrollEvents.trySend(Unit)},speak={graph.voice.read(message.id,message.text)},speaking=speakingId==message.id)
                         }
                     }
                     if(pending) item(key="thinking") {

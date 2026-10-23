@@ -7,6 +7,8 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** Explicitly enabled microphone session; never restarted from boot or after process death. */
 class VoiceService: Service() {
@@ -33,8 +35,8 @@ class VoiceService: Service() {
     override fun onCreate() {
         super.onCreate()
         getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("voice","Голос Luma",NotificationManager.IMPORTANCE_LOW).apply {description="Микрофон и разговорный режим";setSound(null,null)})
-        scope.launch {graph.voice.state.collect {state ->
-            if(state.active) getSystemService(NotificationManager::class.java).notify(74,notification(state.phase))
+        scope.launch {graph.voice.state.map {it.active to it.phase}.distinctUntilChanged().collect {(active,phase) ->
+            if(active) getSystemService(NotificationManager::class.java).notify(74,notification(phase))
         }}
     }
     private fun notification(status: String): Notification {
