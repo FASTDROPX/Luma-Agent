@@ -23,10 +23,7 @@ class VoiceLanguagesTest {
         assertEquals(10,SpeechPacks.all.size)
         for(language in SpeechLanguages.all) {
             assertEquals(setOf("female","male"),SpeechPacks.all.filter {it.language==language.code}.map {it.gender}.toSet())
-            val recognition=VoskPacks.get(language.code)
-            assertEquals(language.code,recognition.language)
-            assertTrue(recognition.sha256.matches(Regex("[a-f0-9]{64}")))
-            assertTrue(recognition.size>30_000_000)
+
         }
         assertEquals(10,SpeechPacks.all.map {it.id}.distinct().size)
         SpeechPacks.all.forEach {assertTrue(it.sha256.matches(Regex("[a-f0-9]{64}")));assertTrue(it.url.startsWith("https://github.com/k2-fsa/sherpa-onnx/"))}

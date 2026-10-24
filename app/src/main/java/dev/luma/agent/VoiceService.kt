@@ -19,8 +19,8 @@ class VoiceService: Service() {
     private var wakeLock: PowerManager.WakeLock?=null
     override fun onBind(intent: Intent?): IBinder?=null
     override fun onStartCommand(intent: Intent?,flags: Int,startId: Int): Int {
-        if(intent?.action=="stop") {graph.voice.stop();stopSelf();return START_NOT_STICKY}
-        val mode=intent?.getStringExtra("mode")?.takeIf {it in setOf("wake","conversation","dictation","read")} ?: run {stopSelf();return START_NOT_STICKY}
+        if(intent?.action=="stop") {graph.voice.disableAndStop();return START_NOT_STICKY}
+        val mode=(intent?.getStringExtra("mode") ?: if(graph.vault.state.value.voice.alwaysListening) "wake" else null)?.takeIf {it in setOf("wake","conversation","dictation","read")} ?: run {stopSelf();return START_NOT_STICKY}
         try {
             val type=if(mode=="read") ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             if(Build.VERSION.SDK_INT>=29) startForeground(74,notification(tr("Подготовка")),type) else startForeground(74,notification(tr("Подготовка")))
@@ -32,7 +32,7 @@ class VoiceService: Service() {
             }
             graph.voice.begin(mode) {stopSelf(startId)}
         } catch(e: Exception) {graph.uiMessage.value=tr("Android не разрешил запуск голоса. Откройте Luma и проверьте доступ к микрофону.");stopSelf()}
-        return START_NOT_STICKY
+        return if(graph.vault.state.value.voice.alwaysListening) START_STICKY else START_NOT_STICKY
     }
     override fun onCreate() {
         super.onCreate()

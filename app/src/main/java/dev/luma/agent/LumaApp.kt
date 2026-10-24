@@ -52,8 +52,8 @@ class AppGraph(val context: Context) {
     private var pendingHandoff: OrbHandoff?=null
     internal fun takeOrbHandoff(): OrbHandoff? {
         // Capture where the orb is NOW: after sending it has moved from the welcome screen into the run card.
-        val live=orbAnchor?.takeIf {android.os.SystemClock.uptimeMillis()-it.at<2000 && appVisible}
-            ?.let {OrbHandoff(it.x,it.y,it.radius,it.seeds())}
+        val live=orbAnchor?.takeIf {android.os.SystemClock.uptimeMillis()-it.at<2000 && (appVisible || it.immersive)}
+            ?.let {OrbHandoff(it.x,it.y,it.radius,it.seeds(),it.immersive)}
         return (live ?: pendingHandoff).also {pendingHandoff=null}
     }
     private var catalogJob: Job? = null; private var catalogRevision = 0
@@ -115,7 +115,7 @@ class AppGraph(val context: Context) {
         if(files.size>4 || files.sumOf {it.size}>16_000_000) {uiMessage.value="Не больше 4 файлов и 16 МБ в одном сообщении.";return false}
         val settings = vault.state.value; val connection = settings.connection()
         if (connection.model.isBlank()) { uiMessage.value = "Сначала подключите провайдера и выберите модель."; return false }
-        if(asAgent) pendingHandoff=orbAnchor?.let {OrbHandoff(it.x,it.y,it.radius,it.seeds())}
+        if(asAgent) pendingHandoff=orbAnchor?.let {OrbHandoff(it.x,it.y,it.radius,it.seeds(),it.immersive)}
         chatBusy.value = true; chatStatus.value=null;chatStartedAt.value = android.os.SystemClock.elapsedRealtime()
         val revision = ++chatRevision
         chatJob = scope.launch {

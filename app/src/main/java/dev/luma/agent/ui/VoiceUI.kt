@@ -33,6 +33,8 @@ import dev.luma.agent.core.VoiceSettings
 @Composable fun VoiceStart(graph: AppGraph,mode: String,label: String,icon: ImageVector,compact: Boolean=false) {
     val context=LocalContext.current
     val voice by graph.voice.state.collectAsStateWithLifecycle()
+    val screen by graph.voice.screen.collectAsStateWithLifecycle()
+    val canStart=!voice.active || (!screen && ((mode=="conversation" && voice.mode in setOf("wake","conversation")) || (mode=="dictation" && voice.phase=="Жду вызова «Люма»")))
     var explain by remember {mutableStateOf(false)}
     fun start() {graph.voice.start(mode)}
     val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {result ->
@@ -47,8 +49,8 @@ import dev.luma.agent.core.VoiceSettings
         if(needed.isEmpty()) start() else permission.launch(needed.toTypedArray())
     }
     val click={if(mode=="wake") explain=true else request()}
-    if(compact) IconButton(onClick=click,enabled=!voice.active,modifier=Modifier.size(44.dp).testTag("voice-$mode")) {Icon(icon,label,Modifier.size(22.dp))}
-    else FilledTonalButton(onClick=click,enabled=!voice.active,modifier=Modifier.fillMaxWidth().testTag("voice-$mode")) {Icon(icon,null,Modifier.size(20.dp));Spacer(Modifier.width(8.dp));Text(label)}
+    if(compact) IconButton(onClick=click,enabled=canStart,modifier=Modifier.size(44.dp).testTag("voice-$mode")) {Icon(icon,label,Modifier.size(22.dp))}
+    else FilledTonalButton(onClick=click,enabled=canStart,modifier=Modifier.fillMaxWidth().testTag("voice-$mode")) {Icon(icon,null,Modifier.size(20.dp));Spacer(Modifier.width(8.dp));Text(label)}
     if(explain) AlertDialog(onDismissRequest={explain=false},icon={Icon(Icons.Outlined.Mic,null)},title={Text(tr("Слушать вызов в фоне?"))},
         text={Text(tr("Микрофон останется включённым, в том числе после блокировки экрана. Вызов распознаётся на телефоне; в облачном режиме речь после вызова отправляется выбранному речевому API. Уведомление позволит остановить прослушивание. После перезапуска телефона нужно включить его снова."))},
         confirmButton={TextButton(onClick={explain=false;request()}) {Text(tr("Включить"))}},dismissButton={TextButton(onClick={explain=false}) {Text(tr("Отмена"))}})
@@ -72,9 +74,9 @@ import dev.luma.agent.core.VoiceSettings
                 if(voice.partial.isNotBlank()) Text(voice.partial.take(200),maxLines=2,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 else Text(if(voice.mode=="dictation") tr("Скажите текст для сообщения") else tr("«Заверши разговор» или кнопка остановки"),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if(voice.mode in setOf("conversation","wake")) IconButton(onClick={graph.voice.screen.value=true}) {Icon(Icons.Outlined.OpenInFull,tr("Разговор с Luma"))}
+            if(voice.mode in setOf("conversation","wake")) IconButton(onClick={graph.voice.start("conversation")}) {Icon(Icons.Outlined.OpenInFull,tr("Разговор с Luma"))}
             if(voice.mode=="dictation") IconButton(onClick={graph.voice.finishDictation()}) {Icon(Icons.Outlined.Check,tr("Завершить диктовку"))}
-            IconButton(onClick={graph.voice.stop()},modifier=Modifier.testTag("voice-stop")) {Icon(Icons.Outlined.StopCircle,tr("Остановить голос"))}
+            IconButton(onClick={graph.voice.disableAndStop()},modifier=Modifier.testTag("voice-stop")) {Icon(Icons.Outlined.StopCircle,tr("Остановить голос"))}
         }
     }
 }
@@ -132,7 +134,6 @@ import dev.luma.agent.core.VoiceSettings
     val context=LocalContext.current
     val config=settings.voice
     fun change(value: VoiceSettings) {graph.update {it.copy(voice=value)}}
-    val zipPicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri ->if(uri!=null) {graph.voice.stop();graph.voice.model.importZip(uri)}}
     LaunchedEffect(Unit) {graph.voice.output.loadVoices()}
     Column(verticalArrangement=Arrangement.spacedBy(14.dp)) {
         SoftCard {
@@ -141,13 +142,12 @@ import dev.luma.agent.core.VoiceSettings
                 graph.voice.model.select(code)
                 change(config.copy(language=code,wakeWords=dev.luma.agent.core.SpeechLanguages.get(code).aliases))
             },enabled=!session.active && !download.busy)
-            Text(tr("Vosk · {0} МБ. Для диктовки и вызова Luma. Каждый язык скачивается отдельно." ,graph.voice.model.spec.size/1_000_000),style=MaterialTheme.typography.bodySmall)
+            Text(tr("{0} · {1} МБ. Распознавание на телефоне без интернета." ,graph.voice.model.spec.title,graph.voice.model.spec.size/1_000_000),style=MaterialTheme.typography.bodySmall)
             if(download.busy) {LumaProgress(Modifier.fillMaxWidth(),progress={download.progress});Text("${download.phase} · ${(download.progress*100).toInt()} %");TextButton(onClick={graph.voice.model.cancel()}) {Text(tr("Отменить загрузку"))}}
             else if(download.ready) Text(tr("Модель установлена"),color=MaterialTheme.colorScheme.primary)
-            else Button(onClick={graph.voice.model.download()},enabled=!session.active,modifier=Modifier.testTag("download-voice-model")) {Icon(Icons.Outlined.Download,null);Spacer(Modifier.width(8.dp));Text(tr("Скачать язык"))}
-            if(!download.busy && !session.active) TextButton(onClick={zipPicker.launch(arrayOf("application/zip","application/octet-stream"))}) {Icon(Icons.Outlined.FolderZip,null);Spacer(Modifier.width(8.dp));Text(tr("Установить модель из ZIP"))}
+            else Button(onClick={graph.voice.model.download()},enabled=!session.active,modifier=Modifier.testTag("download-voice-model")) {Icon(Icons.Outlined.Download,null);Spacer(Modifier.width(8.dp));Text(tr("Скачать модель распознавания"))}
             download.error?.let {Text(tr(it),color=MaterialTheme.colorScheme.error)}
-            Text("Vosk / Alpha Cephei · Apache 2.0",style=MaterialTheme.typography.labelSmall)
+            Text("GigaAM / Whisper · MIT · SenseVoice · Apache 2.0",style=MaterialTheme.typography.labelSmall)
         }
         SoftCard {
             Text(tr("Распознавание речи"),style=MaterialTheme.typography.titleMedium)
@@ -196,8 +196,34 @@ import dev.luma.agent.core.VoiceSettings
             Text(tr("Разговор с Luma"),style=MaterialTheme.typography.titleMedium)
             Text(tr("Говорите, слушайте ответ и продолжайте разговор. Переключатель «Агент» позволяет выполнять действия на телефоне. Во время ответа микрофон приостановлен."),style=MaterialTheme.typography.bodySmall)
             VoiceStart(graph,"conversation",tr("Начать разговор"),Icons.Outlined.Headphones)
-            VoiceStart(graph,"wake",tr("Слушать «Люма» в фоне"),Icons.Outlined.Hearing)
-            if(session.active) FilledTonalButton(onClick={graph.voice.stop()},modifier=Modifier.fillMaxWidth()) {Text(tr("Остановить голос"))}
+            AlwaysListeningControl(graph)
+            if(session.active) FilledTonalButton(onClick={graph.voice.disableAndStop()},modifier=Modifier.fillMaxWidth()) {Text(tr("Остановить голос"))}
         }
     }
+}
+
+/** A persistent setting rather than a one-shot start button, on every entry point. */
+@Composable fun AlwaysListeningControl(graph: AppGraph) {
+    val settings by graph.vault.state.collectAsStateWithLifecycle()
+    val session by graph.voice.state.collectAsStateWithLifecycle()
+    val context=LocalContext.current
+    val wakePermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED) graph.voice.setAlwaysListening(true)
+    }
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(tr("Всегда слушать «Люма»"),style=MaterialTheme.typography.titleSmall)
+                    Text(tr("В фоне и на экране блокировки. После разговора снова ждёт вызова. Микрофон работает с постоянным уведомлением."),style=MaterialTheme.typography.bodySmall)
+                }
+                Switch(settings.voice.alwaysListening,{enabled ->
+                    if(!enabled) graph.voice.setAlwaysListening(false)
+                    else {
+                        val needed=buildList {
+                            if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED) add(Manifest.permission.RECORD_AUDIO)
+                            if(Build.VERSION.SDK_INT>=33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) add(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                        if(needed.isEmpty()) graph.voice.setAlwaysListening(true) else wakePermission.launch(needed.toTypedArray())
+                    }
+                },enabled=session.mode !in setOf("read","dictation"),modifier=Modifier.testTag("always-listening"))
+            }
 }

@@ -12,10 +12,17 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class VoiceTest {
+    @Test fun longSpeechWindowsDoNotRepeatTheirOverlap() {
+        assertEquals("Открой браузер и найди прогноз погоды",VoiceText.joinTranscripts("Открой браузер и найди","и найди прогноз погоды"))
+        assertEquals("Hello, Luma. open settings",VoiceText.joinTranscripts("Hello, Luma.","luma open settings"))
+        assertEquals("bonjour le monde",VoiceText.joinTranscripts("","bonjour le monde"))
+        assertEquals("hello there",VoiceText.joinTranscripts("hello","there"))
+    }
+
     @Test fun oldSettingsKeepVoiceDefaultsAndSecretsRoundTrip() {
         val old=AppSettings.parse(JSONObject("{\"onboarded\":true}"))
         assertEquals(VoiceSettings(),old.voice)
-        val configured=old.copy(voice=VoiceSettings(recognition="cloud",synthesis="cloud",key="private-key",deviceVoice="ru-voice",wakeWords="люма, эй люма"))
+        val configured=old.copy(voice=VoiceSettings(recognition="cloud",synthesis="cloud",key="private-key",deviceVoice="ru-voice",wakeWords="люма, эй люма",alwaysListening=true))
         assertEquals(configured.voice,AppSettings.parse(configured.json()).voice)
     }
     @Test fun malformedVoiceSettingsAreBounded() {

@@ -119,59 +119,8 @@ import kotlin.math.roundToInt
         }
     }
     val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) {importUris(it)}
-    // «Выдайте доступ» card: a runtime permission goes through Android's dialog; a special access opens its settings screen.
-    var requestedPermissions by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    val permissionLauncher=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-        graph.agent.resumeAccess()
-        if (requestedPermissions.any { result[it] != true } && requestedPermissions.any { (context as? Activity)?.shouldShowRequestPermissionRationale(it) == false }) {
-            graph.uiMessage.value = tr("Доступ не выдан. Если Android больше не спрашивает, включите его в настройках Luma.")
-            dev.luma.agent.core.BackgroundAccess.open(context, dev.luma.agent.core.OptionalAccess.appDetails(context))
-        }
-    }
-    var systemActionId by rememberSaveable { mutableStateOf<String?>(null) }
-    val toolActivity = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        systemActionId?.let { graph.agent.completeSystemAction(it, dev.luma.agent.core.SystemToolResult(result.resultCode, result.data)) }; systemActionId = null
-    }
-    val toolSender = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        systemActionId?.let { graph.agent.completeSystemAction(it, dev.luma.agent.core.SystemToolResult(result.resultCode, result.data)) }; systemActionId = null
-    }
-    fun launchToolAction(action: dev.luma.agent.core.SystemToolAction) {
-        if (systemActionId != null) return
-        systemActionId = action.id
-        try {
-            if (action.sender != null) toolSender.launch(androidx.activity.result.IntentSenderRequest.Builder(action.sender).build())
-            else action.intent?.let { toolActivity.launch(it) }
-        } catch (e: Exception) {
-            graph.uiMessage.value = tr("Android не смог открыть приложение для этого действия.")
-            graph.agent.completeSystemAction(action.id, dev.luma.agent.core.SystemToolResult(Activity.RESULT_CANCELED)); systemActionId = null
-        }
-    }
-    val workspacePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) scope.launch {
-            try {
-                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                graph.vault.update { it.copy(folder = uri.toString()) }; graph.agent.resumeAccess()
-            } catch (e: Exception) { graph.uiMessage.value = tr("Не удалось сохранить доступ к выбранной папке.") }
-        }
-    }
-    fun grantAccess(need: dev.luma.agent.core.PermissionNeed) {
-        val runtime = need.runtime
-        if (need.id == "workspace") { workspacePicker.launch(null); return }
-        if (need.id == "screenshots") { scope.launch { graph.vault.update { it.copy(screenshots = true) }; graph.agent.resumeAccess() }; return }
-        if (need.id == "background_location" && android.os.Build.VERSION.SDK_INT >= 30)
-            dev.luma.agent.core.BackgroundAccess.open(context, dev.luma.agent.core.OptionalAccess.appDetails(context))
-        else if(runtime.isNotEmpty()) { requestedPermissions = runtime; permissionLauncher.launch(runtime.toTypedArray()) }
-        else dev.luma.agent.core.BackgroundAccess.open(context,dev.luma.agent.core.OptionalAccess.item(need.id)?.screens(context) ?: dev.luma.agent.core.OptionalAccess.appDetails(context))
-    }
-    LaunchedEffect(run.systemAction?.id,settings.confirmActions) {
-        if(!settings.confirmActions) run.systemAction?.let {launchToolAction(it)}
-    }
-    // Coming back from a settings screen (special access): re-check whether it is now on.
-    val lifecycleOwner=androidx.lifecycle.compose.LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer=androidx.lifecycle.LifecycleEventObserver {_,event->if(event==androidx.lifecycle.Lifecycle.Event.ON_RESUME && graph.agent.state.value.permission!=null) graph.agent.resumeAccess()}
-        lifecycleOwner.lifecycle.addObserver(observer);onDispose {lifecycleOwner.lifecycle.removeObserver(observer)}
-    }
+    val voiceScreen by graph.voice.screen.collectAsStateWithLifecycle()
+    val agentActions=rememberAgentActions(graph,enabled=!voiceScreen)
     // Share → Luma: the text goes into the field, files and pictures become attachments.
     LaunchedEffect(shared,selected) {
         val content=shared ?: return@LaunchedEffect
@@ -262,7 +211,7 @@ import kotlin.math.roundToInt
                     }
                     if(relevantRun && !agentThinking) item(key="agent") {
                         Box(Modifier.animateItem(fadeInSpec=if(reduced) null else tween(260),placementSpec=if(reduced) null else spring(stiffness=Spring.StiffnessMediumLow),fadeOutSpec=null)) {
-                            RunCard(run,approve={rootView.haptic(Haptic.Confirm,settings.haptics);scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},grantAccess=::grantAccess,skipAccess={graph.agent.skipAccess()},fallbackAccess={graph.agent.continueWithoutAccess()},launchSystemAction=::launchToolAction,systemActionBusy=systemActionId!=null,elapsed=rememberElapsed(run.startedAt),stats=tokenStats.takeIf {settings.tokenMeter},meterActive=settings.tokenMeter,
+                            RunCard(run,approve={rootView.haptic(Haptic.Confirm,settings.haptics);scope.launch {if(run.approval?.background==true) {(context as? Activity)?.moveTaskToBack(true);delay(400)};graph.agent.decide(true)}},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},grantAccess=agentActions.grant,skipAccess={graph.agent.skipAccess()},fallbackAccess={graph.agent.continueWithoutAccess()},launchSystemAction=agentActions.launch,systemActionBusy=agentActions.busy,elapsed=rememberElapsed(run.startedAt),stats=tokenStats.takeIf {settings.tokenMeter},meterActive=settings.tokenMeter,
                                 orbSlot=Modifier.onGloballyPositioned {c ->answer=c.positionInRoot()+Offset(c.size.width/2f,c.size.height/2f)-origin})
                         }
                     }
@@ -278,7 +227,7 @@ import kotlin.math.roundToInt
             val alpha by animateFloatAsState(if(visible) 1f else 0f,tween(if(reduced) 0 else 180),label="orb visibility")
             val px=with(density) {diameter.toPx()}
             LumaOrb(Modifier.offset {IntOffset((center.x-px/2).roundToInt(),(center.y-px/2).roundToInt())}.size(diameter)
-                .onGloballyPositioned {c ->if(visible && !overlayVisible) {
+                .onGloballyPositioned {c ->if(visible && !overlayVisible && !voiceScreen) {
                     val location=IntArray(2);rootView.getLocationOnScreen(location)
                     val at=c.positionInRoot()+Offset(c.size.width/2f,c.size.height/2f)
                     graph.orbAnchor=OrbAnchor(at.x+location[0],at.y+location[1],px*.279f,android.os.SystemClock.uptimeMillis()) {
@@ -333,7 +282,7 @@ import kotlin.math.roundToInt
         Column(Modifier.fillMaxWidth().padding(horizontal=24.dp).padding(bottom=28.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text(tr("Параметры чата"),style=MaterialTheme.typography.headlineSmall)
             VoiceStart(graph,"conversation",tr("Голосовой разговор"),Icons.Outlined.Headphones)
-            VoiceStart(graph,"wake",tr("Вызов «Люма» в фоне"),Icons.Outlined.Hearing)
+            AlwaysListeningControl(graph)
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Icon(Icons.Outlined.TravelExplore,null);Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {Text(tr("Поиск в интернете"));Text(tr("Находить источники и читать страницы"),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}

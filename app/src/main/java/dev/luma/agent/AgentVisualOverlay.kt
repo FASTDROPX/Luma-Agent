@@ -134,6 +134,7 @@ internal class AgentVisualOverlay(private val service: AgentAccessibilityService
     suspend fun travelTo(x: Float,y: Float) {
         controller.awaitAction()
         val layer=canvas ?: return
+        layer.setIntroTarget(x,y)
         layer.advanceVisualFrame(SystemClock.uptimeMillis())
         while(layer.introRunning) {
             controller.awaitAction();delay(16);layer.advanceVisualFrame(SystemClock.uptimeMillis());layer.invalidate()
@@ -252,6 +253,8 @@ internal class AgentCanvas(context: Context): View(context) {
     private var entered=false
     private var startedAt=0L
     private var origin: OrbHandoff?=null
+    private var introTarget: android.graphics.PointF?=null
+    fun setIntroTarget(x: Float,y: Float) {if(!entered || introRunning) introTarget=android.graphics.PointF(x,y)}
     private var particles: CursorParticleField?=null
     internal val particleCount get()=particles?.particles?.size ?: 0
     internal val particleField get()=particles
@@ -382,7 +385,7 @@ internal class AgentCanvas(context: Context): View(context) {
             val source=origin?.takeIf {it.x.isFinite() && it.y.isFinite() && it.radius.isFinite() && it.radius>0}
             // The cursor leaves its place — the chat sphere when the task came from the chat, otherwise from just below the screen.
             startX=source?.x?.coerceIn(0f,w) ?: (w/2f);startY=source?.y?.coerceIn(0f,h) ?: (h+28*d)
-            startRadius=source?.radius?.coerceIn(6*d,80*d) ?: (14*d)
+            startRadius=source?.radius?.coerceIn(6*d,minOf(w,h)*.48f) ?: (14*d)
             edgeOf(startX,startY).let {(x,y)->anchorX=x;anchorY=y}
             if(reduced()) {
                 if(source!=null) {cursor.x=w/2f;cursor.y=h/2f}
@@ -394,9 +397,9 @@ internal class AgentCanvas(context: Context): View(context) {
         val dt=(now-lastFrame).coerceIn(0,50)/1000f;lastFrame=now
         if(introRunning) {
             val t=((now-startedAt)/ARRIVE.toFloat()).coerceIn(0f,1f)
-            val (x,y)=Glide.at(startX,startY,w/2f,h/2f,t);cursor.x=x;cursor.y=y
+            val (x,y)=Glide.at(startX,startY,introTarget?.x ?: (w/2f),introTarget?.y ?: (h/2f),t);cursor.x=x;cursor.y=y
             radius=startRadius+(14*d-startRadius)*Glide.s(t)
-            presence=smooth(t)
+            presence=if(origin?.immersive==true) 1f else smooth(t)
             if(t>=1f) {introRunning=false;moving=false}
         }
         if(leaving) {

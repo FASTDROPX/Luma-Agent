@@ -20,3 +20,14 @@ Sources: https://repo.maven.apache.org/maven2/ru/noties/jlatexmath-android/0.2.0
 AndroidX / Compose, Kotlin / kotlinx.coroutines, and OkHttp are distributed
 under the Apache License 2.0. See APACHE-2.0.txt and the respective upstream
 project notices. No warranties are provided by these upstream projects.
+
+
+Speech inference: sherpa-onnx (Apache 2.0), ONNX Runtime (MIT).
+See sherpa-onnx.txt and onnxruntime.txt.
+Optional downloaded ASR models: GigaAM v2 (GigaChat Team, MIT),
+OpenAI Whisper Small (MIT), Silero VAD (MIT), SenseVoice (Apache 2.0).
+SenseVoice: https://github.com/FunAudioLLM/SenseVoice (APACHE-2.0.txt).
+See giga-am-MIT.txt, whisper-MIT.txt and silero-vad-MIT.txt.
+Optional Piper voice data have individual model cards in docs/voice-model-cards.
+eSpeak NG is GPL-3.0; see espeak-ng.txt.
+Model weights are downloaded separately and are not bundled in the APK.

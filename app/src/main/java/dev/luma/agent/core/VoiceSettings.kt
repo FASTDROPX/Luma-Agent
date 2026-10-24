@@ -10,12 +10,12 @@ data class VoiceSettings(
     val sttModel: String = "whisper-1", val ttsModel: String = "gpt-4o-mini-tts",
     val cloudVoice: String = "coral", val deviceVoice: String = "", val speed: Float = 1f,
     val wakeWords: String = "люма, эй люма, лума, эй лума, luma",
-    val language: String = "ru", val outputLanguage: String = "ru", val gender: String = "female"
+    val language: String = "ru", val outputLanguage: String = "ru", val gender: String = "female", val alwaysListening: Boolean = false
 ) {
     fun json() = JSONObject().put("recognition",recognition).put("synthesis",synthesis)
         .put("endpoint",endpoint).put("key",key).put("sttModel",sttModel).put("ttsModel",ttsModel)
         .put("cloudVoice",cloudVoice).put("deviceVoice",deviceVoice).put("speed",speed.toDouble()).put("wakeWords",wakeWords)
-        .put("language",language).put("outputLanguage",outputLanguage).put("gender",gender)
+        .put("language",language).put("outputLanguage",outputLanguage).put("gender",gender).put("alwaysListening",alwaysListening)
     companion object {
         fun parse(j: JSONObject?): VoiceSettings {
             if(j==null) return VoiceSettings()
@@ -26,7 +26,7 @@ data class VoiceSettings(
                 j.optDouble("speed",1.0).toFloat().let {if(it.isFinite()) it.coerceIn(.5f,2f) else 1f},j.optString("wakeWords",d.wakeWords).take(500),
                 j.optString("language","ru").takeIf {it in setOf("ru","en","zh","de","fr")} ?: "ru",
                 j.optString("outputLanguage","ru").takeIf {it in setOf("ru","en","zh","de","fr")} ?: "ru",
-                if(j.optString("gender")=="male") "male" else "female")
+                if(j.optString("gender")=="male") "male" else "female",j.optBoolean("alwaysListening",false))
         }
     }
 }
@@ -42,10 +42,18 @@ object VoiceText {
             .firstOrNull {prefix(normalized,it)} ?: return null
         return normalized.removePrefix(wake).trim()
     }
+    /** Merge the one-second overlap of long Whisper windows, keeping original punctuation. */
+    fun joinTranscripts(first: String,next: String): String {
+        val left=first.trim().split(Regex("\\s+")).filter {it.isNotEmpty()}
+        val right=next.trim().split(Regex("\\s+")).filter {it.isNotEmpty()}
+        val overlap=(minOf(left.size,right.size,20) downTo 1).firstOrNull {n ->
+            left.takeLast(n).map(::normalize)==right.take(n).map(::normalize)
+        } ?: 0
+        return (left+right.drop(overlap)).joinToString(" ")
+    }
     fun stop(text: String) = normalize(text) in setOf("стоп разговор","заверши разговор","закончи разговор","хватит","до свидания","люма стоп","лума стоп",
         "stop conversation","end conversation","goodbye","beende das gespräch","gespräch beenden","au revoir","termine la conversation","结束对话","停止对话","结束 对话","停止 对话")
-    // «Люма» isn't in Vosk's Russian dictionary; its two syllables are. A constrained
-    // recognizer detects the name while a second recognizer preserves the whole command.
+    // Legacy word-timing helpers retained for imported transcripts; Whisper uses afterWake().
     fun wakeGrammar(aliases: String,language: String="ru")=aliases.split(',').map {normalize(it).let {name->if(language=="ru") name.replace("люма","лю ма").replace("лума","лу ма").replace("luma","лу ма") else name}}.filter {it.isNotBlank()}.distinct()
     fun wakeEnd(result: JSONObject,aliases: String,language: String="ru"): Float? {
         val text=result.optString("text",result.optString("partial"))

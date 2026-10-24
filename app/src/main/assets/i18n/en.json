@@ -1784,5 +1784,17 @@
   "↑ {0} · ↓ {1} т/с": "↑ {0} · ↓ {1} tok/s",
   "↓ {0} т/с": "↓ {0} t/s",
   "локально": "local",
-  "Импорт": "Imported"
+  "Импорт": "Imported",
+  "Не удалось ответить": "Could not answer",
+  "Whisper Small · {0} МБ. Одна модель для всех языков. Работает на телефоне без интернета.": "Whisper Small · {0} MB. One model for all languages. Runs on your phone offline.",
+  "Скачать Whisper": "Download Whisper",
+  "Всегда слушать «Люма»": "Always listen for “Luma”",
+  "В фоне и на экране блокировки. После разговора снова ждёт вызова. Микрофон работает с постоянным уведомлением.": "In the background and on the lock screen. Returns to waiting after a conversation. A persistent notification shows when the microphone is on.",
+  "Проверяю модель": "Verifying model",
+  "Скачиваю Whisper · {0}/{1}": "Downloading Whisper · {0}/{1}",
+  "{0} · {1} МБ. Распознавание на телефоне без интернета.": "{0} · {1} MB. Offline speech recognition on your phone.",
+  "Скачать модель распознавания": "Download speech model",
+  "Сначала скачайте модель распознавания в настройках → Голос.": "Download the speech recognition model in Settings → Voice first.",
+  "Для установки распознавания нужно ещё {0} МБ свободного места.": "Speech recognition installation needs {0} MB of free space.",
+  "Файл модели повреждён. Повторите загрузку.": "The model file is damaged. Download it again."
 }

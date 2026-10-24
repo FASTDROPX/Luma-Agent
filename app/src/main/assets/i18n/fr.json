@@ -1784,5 +1784,17 @@
   "запросить конкретный доступ карточкой в чате; Android подтверждает пользователь": "demander un accès spécifique à l'aide d'une carte dans le chat ; Android confirme l'utilisateur",
   "иначе отвечай сразу. Не больше {0} поисков и {1} страниц на ответ; открывай страницы, когда фрагментов мало. ": "sinon répondez immédiatement. Pas plus de {0} recherches et {1} pages par réponse ; ouvrir des pages lorsqu'il y a peu de fragments.",
   "локально": "local",
-  "Импорт": "Importé"
+  "Импорт": "Importé",
+  "Не удалось ответить": "Réponse impossible",
+  "Whisper Small · {0} МБ. Одна модель для всех языков. Работает на телефоне без интернета.": "Whisper Small · {0} Mo. Un modèle pour toutes les langues, utilisable hors ligne sur le téléphone.",
+  "Скачать Whisper": "Télécharger Whisper",
+  "Всегда слушать «Люма»": "Toujours écouter « Luma »",
+  "В фоне и на экране блокировки. После разговора снова ждёт вызова. Микрофон работает с постоянным уведомлением.": "En arrière-plan et sur l’écran verrouillé. Attend de nouveau votre appel après la conversation. Une notification permanente indique que le microphone est actif.",
+  "Проверяю модель": "Vérification du modèle",
+  "Скачиваю Whisper · {0}/{1}": "Téléchargement de Whisper · {0}/{1}",
+  "{0} · {1} МБ. Распознавание на телефоне без интернета.": "{0} · {1} Mo. Reconnaissance vocale hors ligne sur le téléphone.",
+  "Скачать модель распознавания": "Télécharger le modèle de reconnaissance",
+  "Сначала скачайте модель распознавания в настройках → Голос.": "Téléchargez d’abord le modèle de reconnaissance dans Paramètres → Voix.",
+  "Для установки распознавания нужно ещё {0} МБ свободного места.": "L’installation de la reconnaissance nécessite encore {0} Mo d’espace libre.",
+  "Файл модели повреждён. Повторите загрузку.": "Le fichier du modèle est endommagé. Téléchargez-le à nouveau."
 }

@@ -19,6 +19,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import dev.luma.agent.OrbAnchor
+import dev.luma.agent.CursorSeed
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -40,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import dev.luma.agent.AppGraph
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlin.math.*
 
 /** A separate, immersive voice surface. It never changes the phone-control overlays. */
@@ -52,15 +58,23 @@ import kotlin.math.*
     val agent by graph.chats.agentMode.collectAsStateWithLifecycle()
     val run by graph.agent.state.collectAsStateWithLifecycle()
     val settings by graph.vault.state.collectAsStateWithLifecycle()
+    val showRun=run.active && run.acting
     var controls by remember { mutableStateOf(false) }
     var entered by remember { mutableStateOf(false) }
     var closing by remember { mutableStateOf(false) }
     var rootCoordinates by remember {mutableStateOf<LayoutCoordinates?>(null)}
     var headerBottom by remember {mutableFloatStateOf(0f)}
     var statusTop by remember {mutableFloatStateOf(0f)}
+    var cardTop by remember {mutableFloatStateOf(0f)}
+    val overlay by graph.overlayVisible.collectAsStateWithLifecycle()
+    val actions=rememberAgentActions(graph)
+    val scope=rememberCoroutineScope()
+    val context=LocalContext.current
+    val stats by graph.api.stats.collectAsStateWithLifecycle()
     val reduced=LocalReducedMotion.current
+    val cardReserve=with(LocalDensity.current) {280.dp.toPx()}
     LaunchedEffect(Unit) {entered=true}
-    LaunchedEffect(closing) {if(closing) {kotlinx.coroutines.delay(if(reduced) 0 else 280);graph.voice.stop()}}
+    LaunchedEffect(closing) {if(closing) {kotlinx.coroutines.delay(if(reduced) 0 else 280);graph.voice.endConversation()}}
     Dialog(onDismissRequest={closing=true}, properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=false)) {
         val view=LocalView.current
         val light=MaterialTheme.colorScheme.background.luminance()>.5f
@@ -74,11 +88,17 @@ import kotlin.math.*
             val on=MaterialTheme.colorScheme.onSurface
             val speaking=state.phase=="Озвучиваю"
             val thinking=state.phase in listOf("Думаю","Расшифровываю","Подготовка")
-            val label=when {speaking->tr("Luma отвечает");thinking->if(run.active) tr("Luma выполняет задачу") else tr("Luma думает");muted->tr("Микрофон выключен");else->tr("Я слушаю")}
+            val label=when {speaking->tr("Luma отвечает");thinking->if(showRun) tr("Luma выполняет задачу") else tr("Luma думает");muted->tr("Микрофон выключен");state.phase=="Ошибка"->tr("Не удалось ответить");else->tr("Я слушаю")}
             Box(Modifier.fillMaxSize().background(background).onGloballyPositioned {rootCoordinates=it}.testTag("conversation-screen")) {
                 ConversationEdgeLight(Modifier.matchParentSize(),outputLevel,speaking)
                 // The same identity as the app's orb, expanded into a responsive particle field.
-                VoiceConstellation(Modifier.fillMaxSize(),state.level,outputLevel,speaking,thinking,muted,headerBottom,statusTop)
+                VoiceConstellation(Modifier.fillMaxSize().graphicsLayer {alpha=if(overlay) 0f else 1f},state.level,outputLevel,speaking,thinking,muted,headerBottom,if(showRun) minOf(cardTop.takeIf {it>headerBottom} ?: Float.MAX_VALUE,(statusTop-cardReserve).coerceAtLeast(headerBottom+cardReserve*.35f)) else statusTop) {center,radius,seeds ->
+                    if(!overlay) {
+                        val screen=IntArray(2);val window=IntArray(2);view.getLocationOnScreen(screen);view.getLocationInWindow(window)
+                        val at=rootCoordinates?.takeIf {it.isAttached}?.localToWindow(center) ?: center
+                        graph.orbAnchor=OrbAnchor(at.x+screen[0]-window[0],at.y+screen[1]-window[1],radius,android.os.SystemClock.uptimeMillis(),immersive=true) {seeds}
+                    }
+                }
                 Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal=24.dp)) {
                     Row(Modifier.fillMaxWidth().height(60.dp).onGloballyPositioned {coordinates ->
                         rootCoordinates?.takeIf {it.isAttached}?.let {headerBottom=it.localPositionOf(coordinates,Offset(0f,coordinates.size.height.toFloat())).y}
@@ -92,22 +112,31 @@ import kotlin.math.*
                         IconButton(onClick={controls=true},modifier=Modifier.testTag("conversation-settings")) {Icon(Icons.Outlined.Tune,tr("Настройки разговора"))}
                     }
                     Spacer(Modifier.weight(1f))
+                    AnimatedVisibility(showRun,enter=fadeIn(tween(if(reduced) 0 else 420,delayMillis=if(reduced) 0 else 200))+expandVertically(tween(if(reduced) 0 else 550,delayMillis=if(reduced) 0 else 100,easing=FastOutSlowInEasing),expandFrom=Alignment.Top),exit=fadeOut(tween(220))+shrinkVertically(tween(450)),
+                        modifier=Modifier.onGloballyPositioned {c ->rootCoordinates?.takeIf {it.isAttached}?.let {cardTop=it.localPositionOf(c,Offset.Zero).y}}) {
+                        Box(Modifier.fillMaxWidth().heightIn(max=280.dp).verticalScroll(rememberScrollState()).padding(bottom=12.dp).testTag("conversation-run-card")) {
+                            RunCard(run,approve={scope.launch {
+                                if(run.approval?.background==true) {(context as? android.app.Activity)?.moveTaskToBack(true);kotlinx.coroutines.delay(400)}
+                                graph.agent.decide(true)
+                            }},reject={graph.agent.decide(false)},pause={graph.agent.togglePause()},stop={graph.agent.stop()},
+                                maxSteps=if(settings.unlimitedAgent) 0 else settings.maxSteps,retry={graph.agent.retryRequest()},
+                                grantAccess=actions.grant,skipAccess={graph.agent.skipAccess()},fallbackAccess={graph.agent.continueWithoutAccess()},
+                                launchSystemAction=actions.launch,systemActionBusy=actions.busy,elapsed=rememberElapsed(run.startedAt),stats=stats,meterActive=settings.tokenMeter)
+                        }
+                    }
                     AnimatedContent(label,modifier=Modifier.onGloballyPositioned {coordinates ->
                         rootCoordinates?.takeIf {it.isAttached}?.let {statusTop=it.localPositionOf(coordinates,Offset.Zero).y}
                     },transitionSpec={fadeIn(tween(300)) togetherWith fadeOut(tween(180))},label="voice phase") {
                         Text(it,Modifier.fillMaxWidth(),style=MaterialTheme.typography.headlineSmall,textAlign=TextAlign.Center)
                     }
                     Spacer(Modifier.height(14.dp))
-                    Box(Modifier.fillMaxWidth().height(92.dp),contentAlignment=Alignment.TopCenter) {
+                    Box(Modifier.fillMaxWidth().height(if(showRun) 48.dp else 92.dp),contentAlignment=Alignment.TopCenter) {
                         Text(state.partial.take(500),Modifier.fillMaxWidth().padding(horizontal=12.dp),maxLines=3,overflow=TextOverflow.Ellipsis,
                             color=on.copy(alpha=.6f),style=MaterialTheme.typography.bodyLarge,textAlign=TextAlign.Center)
                     }
                     Row(Modifier.align(Alignment.CenterHorizontally),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                         FilterChip(!agent,{graph.setAgentMode(false)},label={Text(tr("Чат"))},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(16.dp))})
                         FilterChip(agent,{graph.setAgentMode(true)},label={Text(tr("Агент"))},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(16.dp))})
-                    }
-                    if(run.active && (run.approval!=null || run.permission!=null || run.systemAction!=null)) {
-                        FilledTonalButton(onClick={graph.voice.screen.value=false;openChat()},modifier=Modifier.align(Alignment.CenterHorizontally)) {Text(tr("Нужно подтверждение"))}
                     }
                     Spacer(Modifier.height(24.dp))
                     Row(Modifier.fillMaxWidth().padding(horizontal=12.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
@@ -153,26 +182,33 @@ import kotlin.math.*
     }
     Canvas(modifier) {
         if(presence<.001f) return@Canvas
-        val colors=listOf(Color(0xff9fe8ff),Color(0xff83b7ff),Color(0xffc2abff),Color(0xff8ccfff),Color(0xff9fe8ff))
-        val width=(14f+amplitude*34f).dp.toPx()*presence
-        rotate(0f) {
-            // Nested low-alpha strokes produce an inward halo without software blur.
-            for(layer in 24 downTo 1) {
-                val glow=Brush.sweepGradient(colors.map {it.copy(alpha=presence*(.006f+amplitude*.011f))},center=Offset(size.width*(.5f+.1f*sin(phase*.02f)),size.height*.5f))
-                drawRoundRect(glow,cornerRadius=androidx.compose.ui.geometry.CornerRadius(28.dp.toPx()),style=Stroke(width*layer/12f))
+        // Soft travelling light pools: smooth attack/release, with no hard full-screen neon rim.
+        val colors=listOf(Color(0xff9fe8ff),Color(0xff83b7ff),Color(0xffc2abff))
+        val corner=androidx.compose.ui.geometry.CornerRadius(30.dp.toPx())
+        val inset=1.dp.toPx()
+        for(i in 0 until 3) {
+            val angle=phase*.035f+i*2.0944f
+            val spot=Offset(size.width*(.5f+.52f*cos(angle)),size.height*(.5f+.52f*sin(angle)))
+            val reach=size.minDimension*(.65f+amplitude*.28f)
+            for(layer in 16 downTo 1) {
+                val width=(2f+layer*(1.4f+amplitude*1.5f)).dp.toPx()
+                val brush=Brush.radialGradient(listOf(colors[i].copy(alpha=presence*(.012f+amplitude*.016f)),Color.Transparent),spot,reach)
+                drawRoundRect(brush,Offset(inset,inset),androidx.compose.ui.geometry.Size(size.width-2*inset,size.height-2*inset),corner,style=Stroke(width))
             }
-            val rim=Brush.sweepGradient(colors.map {it.copy(alpha=presence*(.22f+amplitude*.46f))})
-            drawRoundRect(rim,cornerRadius=androidx.compose.ui.geometry.CornerRadius(28.dp.toPx()),style=Stroke((1f+amplitude*1.5f).dp.toPx()))
+            val rim=Brush.radialGradient(listOf(colors[i].copy(alpha=presence*(.32f+amplitude*.32f)),Color.Transparent),spot,reach)
+            drawRoundRect(rim,Offset(inset,inset),androidx.compose.ui.geometry.Size(size.width-2*inset,size.height-2*inset),corner,style=Stroke((1f+amplitude*.7f).dp.toPx()))
         }
     }
 }
 
 /** Draw-time animation: no recomposition per particle, no bitmap filters or per-frame allocations of particle state. */
-@Composable internal fun VoiceConstellation(modifier: Modifier,input: Float,output: Float,speaking: Boolean,thinking: Boolean,muted: Boolean,contentTop: Float=0f,contentBottom: Float=0f) {
+@Composable internal fun VoiceConstellation(modifier: Modifier,input: Float,output: Float,speaking: Boolean,thinking: Boolean,muted: Boolean,contentTop: Float=0f,contentBottom: Float=0f,onOrb: (Offset,Float,List<CursorSeed>)->Unit={_,_,_->}) {
     val reduced=LocalReducedMotion.current
     val lifecycle=LocalLifecycleOwner.current
     val primary=MaterialTheme.colorScheme.primary
+    val smoothBottom by animateFloatAsState(contentBottom,tween(if(reduced) 0 else 650,easing=FastOutSlowInEasing),label="voice sphere rises")
     var time by remember {mutableFloatStateOf(0f)}
+    var orbitTime by remember {mutableFloatStateOf(0f)}
     val energy by animateFloatAsState(if(reduced) 0f else if(speaking) output.coerceAtLeast(.18f) else if(muted) 0f else input,
         animationSpec=if(reduced) snap() else tween(180, easing=LinearOutSlowInEasing),label="voice energy")
     val speech by animateFloatAsState(if(speaking) 1f else 0f,tween(if(reduced) 0 else 700),label="speech orbit")
@@ -180,16 +216,16 @@ import kotlin.math.*
     LaunchedEffect(reduced,lifecycle) {
         if(!reduced) lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             var last=0L
-            while(isActive) withFrameNanos {now ->if(last!=0L) time+=((now-last)/1e9f).coerceAtMost(.05f);last=now}
+            while(isActive) withFrameNanos {now ->if(last!=0L) {val dt=((now-last)/1e9f).coerceAtMost(.05f);time+=dt;orbitTime+=dt*(1f+speech*2.4f+energy*3.5f)};last=now}
         }
     }
     Canvas(modifier) {
         val t=time
         val top=if(contentBottom>contentTop) contentTop else size.height*.13f
-        val bottom=if(contentBottom>contentTop) contentBottom else size.height*.62f
+        val bottom=if(smoothBottom>contentTop) smoothBottom else size.height*.62f
         val available=bottom-top
-        val c=Offset(center.x,top+available*.65f)
-        val radius=min(size.minDimension*.29f,available*.30f)*(1f+energy*.065f+sin(t*1.3f)*.012f)
+        val c=Offset(center.x,top+available*.57f)
+        val radius=min(size.minDimension*.29f,available*.46f)*(1f+energy*.065f+sin(t*1.3f)*.012f)
         val ice=Color(0xff9ee8ff);val violet=lerp(Color(0xffb4b8ff),primary,.2f)
         drawCircle(Brush.radialGradient(listOf(ice.copy(alpha=.10f+energy*.05f),violet.copy(alpha=.035f),Color.Transparent),c,radius*2.3f),radius*2.3f,c)
         fun particleField(front: Boolean) {
@@ -199,7 +235,7 @@ import kotlin.math.*
                 val inward=1.95f-cycle*.65f
                 val outward=1.25f+cycle*.75f
                 val orbit=(inward*(1f-speech)+outward*speech)*(1f-thought*.13f)+energy*.25f
-                val a=seed+t*(.085f+(i%7)*.008f)*(if(i%2==0) 1 else -1)+speech*.15f
+                val a=seed+orbitTime*(.085f+(i%7)*.008f)*(if(i%2==0) 1 else -1)
                 val z=sin(seed*.63f+t*.16f)
                 if((z>0)!=front) continue
                 val flow=if(speech>.1f) sin(t*1.9f-i*.12f)*speech*.11f else sin(t*.7f+i)*.025f
@@ -208,12 +244,16 @@ import kotlin.math.*
                 val p=c+Offset(x,y)
                 val alpha=(.16f+(z+1f)*.19f+energy*.25f)*sin(cycle*PI.toFloat()).coerceAtLeast(.02f)*(if(muted && !speaking) .35f else 1f)
                 val color=lerp(ice,violet,(sin(seed)+1f)/2).copy(alpha=alpha)
-                val dot=(.7f+(i%5)*.28f).dp.toPx()*(.75f+(z+1f)*.25f)
+                val dot=(.7f+(i%5)*.28f).dp.toPx()*(.75f+(z+1f)*.25f)*(1f+speech*.12f*sin(t*3f+seed)+energy*.22f)
                 if(i%9==0) drawCircle(color.copy(alpha=alpha*.10f),dot*4f,p)
                 drawCircle(color,dot,p)
                 if(speech>.1f && i%3==0) drawLine(color.copy(alpha=alpha*.35f),p,p+Offset(-sin(a),cos(a))*(3f+energy*12f)*speech,strokeWidth=dot*.7f,cap=StrokeCap.Round)
             }
         }
+        onOrb(c,radius,(0 until 64).map {i ->
+            val a=i*2.399963f+orbitTime*(.085f+(i%7)*.008f)*(if(i%2==0) 1 else -1)
+            CursorSeed(cos(a)*1.5f,sin(a)*.7f,sin(i*1.51f),.75f+(i%5)*.15f,(sin(i.toFloat())+1f)/2f)
+        })
         particleField(false)
         // A soft spherical body with slowly moving internal aurora ribbons.
         val light=c+Offset(-radius*.30f,-radius*.38f)
@@ -243,7 +283,14 @@ import kotlin.math.*
         val points=floatArrayOf(0f,-1f,.23f,-.23f,1f,0f,.23f,.23f,0f,1f,-.23f,.23f,-1f,0f,-.23f,-.23f)
         for(i in points.indices step 2) {if(i==0) mark.moveTo(c.x+points[i]*s,c.y+points[i+1]*s) else mark.lineTo(c.x+points[i]*s,c.y+points[i+1]*s)}
         mark.close();drawPath(mark,Color.White.copy(alpha=.94f))
-        if(thought>.01f) rotate(t*16f,c) {drawArc(violet.copy(alpha=.3f*thought),-40f,75f,false,c-Offset(radius*1.1f,radius*1.1f),androidx.compose.ui.geometry.Size(radius*2.2f,radius*2.2f),style=Stroke(1.dp.toPx(),cap=StrokeCap.Round))}
+        if(thought>.01f) {
+            for(i in 0 until 3) rotate(t*(20f+i*9f)*(if(i%2==0) 1 else -1)+i*120f,c) {
+                val r=radius*(1.10f+i*.09f)
+                drawArc(Brush.sweepGradient(listOf(Color.Transparent,ice.copy(alpha=.6f*thought),violet.copy(alpha=.1f*thought),Color.Transparent),c),-80f,150f,false,c-Offset(r,r),androidx.compose.ui.geometry.Size(r*2,r*2),style=Stroke((1.2f-i*.2f).dp.toPx(),cap=StrokeCap.Round))
+                val spark=c+Offset(cos(t*.7f+i)*r,sin(t*.7f+i)*r)
+                drawCircle(ice.copy(alpha=.8f*thought),2.dp.toPx(),spark)
+            }
+        }
         particleField(true)
     }
 }

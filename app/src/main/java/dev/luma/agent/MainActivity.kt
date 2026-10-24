@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
         setContent { AppRoot(graph, requestedScreen) }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); requestedScreen = intent.getStringExtra("screen") ?: "chat"; setIntent(intent); takeShared(intent) }
-    override fun onStart() { super.onStart(); (application as LumaApp).graph.visibleScreens.incrementAndGet() }
+    override fun onStart() { super.onStart(); (application as LumaApp).graph.visibleScreens.incrementAndGet(); (application as LumaApp).graph.voice.restoreListening() }
     override fun onStop() { (application as LumaApp).graph.visibleScreens.updateAndGet { (it - 1).coerceAtLeast(0) }; super.onStop() }
     /** Share → Luma from another app: the chat screen picks the text and files up. */
     private fun takeShared(intent: Intent) {

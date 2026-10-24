@@ -1784,5 +1784,17 @@
   "↑ {0} · ↓ {1} т/с": "↑ {0} · ↓ {1} Token/s",
   "↓ {0} т/с": "↓ {0} t/s",
   "локально": "lokal",
-  "Импорт": "Importiert"
+  "Импорт": "Importiert",
+  "Не удалось ответить": "Antwort fehlgeschlagen",
+  "Whisper Small · {0} МБ. Одна модель для всех языков. Работает на телефоне без интернета.": "Whisper Small · {0} MB. Ein Modell für alle Sprachen. Läuft offline auf dem Handy.",
+  "Скачать Whisper": "Whisper herunterladen",
+  "Всегда слушать «Люма»": "Immer auf „Luma“ hören",
+  "В фоне и на экране блокировки. После разговора снова ждёт вызова. Микрофон работает с постоянным уведомлением.": "Im Hintergrund und auf dem Sperrbildschirm. Wartet nach dem Gespräch wieder auf den Aufruf. Ein dauerhaftes Symbol zeigt das aktive Mikrofon an.",
+  "Проверяю модель": "Modell wird überprüft",
+  "Скачиваю Whisper · {0}/{1}": "Whisper wird geladen · {0}/{1}",
+  "{0} · {1} МБ. Распознавание на телефоне без интернета.": "{0} · {1} MB. Offline-Spracherkennung auf dem Handy.",
+  "Скачать модель распознавания": "Spracherkennungsmodell herunterladen",
+  "Сначала скачайте модель распознавания в настройках → Голос.": "Lade zuerst das Spracherkennungsmodell unter Einstellungen → Stimme herunter.",
+  "Для установки распознавания нужно ещё {0} МБ свободного места.": "Für die Spracherkennung werden noch {0} MB freier Speicher benötigt.",
+  "Файл модели повреждён. Повторите загрузку.": "Die Modelldatei ist beschädigt. Lade sie erneut herunter."
 }

@@ -40,6 +40,20 @@ class UiTest {
     private lateinit var graph: AppGraph
     @Before fun setup(){I18n.choose("ru");TestKeys.install();graph=(ApplicationProvider.getApplicationContext<LumaApp>()).graph;runBlocking{graph.vault.update{it.copy(reducedMotion=true,dynamicColors=false,theme="dark",language="ru")}}}
     @After fun teardown(){graph.scope.coroutineContext[kotlinx.coroutines.Job]?.cancel();TestKeys.restore()}
+    @Test fun voiceAgentCardStaysInsideConversation() {
+        runBlocking {graph.vault.update {it.copy(onboarded=true)}}
+        graph.voice.state.value=VoiceState("conversation","Думаю","Открой контакты")
+        graph.voice.screen.value=true
+        @Suppress("UNCHECKED_CAST")
+        val state=AgentController::class.java.getDeclaredField("mutable").apply {isAccessible=true}.get(graph.agent) as kotlinx.coroutines.flow.MutableStateFlow<RunState>
+        state.value=RunState(active=true,acting=true,stage="Открываю контакты",startedAt=1)
+        compose.setContent {AppRoot(graph)}
+        compose.onNodeWithTag("conversation-screen").assertIsDisplayed()
+        compose.onNodeWithTag("conversation-run-card").assertIsDisplayed()
+        compose.onNodeWithText("Luma работает").assertIsDisplayed()
+        compose.onNodeWithText("Открываю контакты").assertIsDisplayed()
+        assertTrue(graph.voice.screen.value)
+    }
     @Test fun composerHasTwoModesAndOptionsStayInASheet() {
         runBlocking {graph.vault.update {it.copy(onboarded=true)}}
         compose.setContent {AppRoot(graph)}

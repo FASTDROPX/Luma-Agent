@@ -36,9 +36,13 @@ class DeviceProviderTest {
         assertTrue(downloadError(IOException()).contains("сохранённая часть"))
         assertFalse(downloadError(UnknownHostException()).contains("мест"))
     }
-    @Test fun allVoiceSourcesUseSamePinnedArchive() {
-        assertEquals(3,VoiceModel.SOURCES.size)
-        assertTrue(VoiceModel.SOURCES.all {it.startsWith("https://") && it.endsWith("vosk-model-small-ru-0.22.zip")})
-        assertEquals(64,VoiceModel.SHA256.length)
+    @Test fun recognitionFilesArePinnedAndDoNotLoadOldModels() {
+        assertEquals(4,VoiceModel.WHISPER_ASSETS.size)
+        assertEquals(376129181L,VoiceModel.pack("en").size)
+        VoiceModel.WHISPER_ASSETS.forEach {
+            assertTrue(it.url.startsWith("https://"))
+            assertTrue(it.sha256.matches(Regex("[a-f0-9]{64}")))
+            assertFalse(it.name.contains("vosk"))
+        }
     }
 }
