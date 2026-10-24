@@ -42,9 +42,11 @@ import dev.luma.agent.core.*
     Column(Modifier.fillMaxSize()) {
         PrimaryTabRow(selectedTabIndex = modelTab, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
             listOf("API", "На телефоне", "Каталог").forEachIndexed { index, title ->
-                Tab(selected = modelTab == index, onClick = { modelTab = index }, text = {
-                    Text(title, maxLines = 1, style = MaterialTheme.typography.labelLarge)
-                })
+                Tab(selected = modelTab == index, onClick = { modelTab = index }) {
+                    Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                        Text(title, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) { when(modelTab) {1->DeviceModelsScreen(graph);2->HuggingFaceScreen(graph);else->ApiConnectionsScreen(graph)} }
