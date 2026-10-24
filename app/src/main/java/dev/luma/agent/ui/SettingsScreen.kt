@@ -137,7 +137,7 @@ import kotlin.math.roundToInt
                         }
                         SettingSlider("Контекст чата",parameters.contextTurns.toFloat(),2f..30f,"${parameters.contextTurns} сообщений",steps=13) {v->generation {it.copy(contextTurns=v.roundToInt())}}
                         Text("«Авто» значит, что Luma не добавляет своего ограничения. Ответ всё равно конечен: его ограничивают максимальный ответ модели, контекстное окно и квоты провайдера или сервера. " +
-                            (when(provider) {Provider.CLAUDE->"Claude требует явный лимит — Luma отправляет максимум выбранной модели.";Provider.LOCAL->"Локальный сервер сам решает, где остановиться; у Ollama размер контекста задаётся на сервере (OLLAMA_CONTEXT_LENGTH или num_ctx в Modelfile).";else->"Параметр лимита не отправляется, и провайдер использует свой предел."}),
+                            (when(provider) {Provider.CLAUDE->"Claude требует явный лимит — Luma отправляет максимум выбранной модели.";Provider.DEVICE->"На телефоне «Авто» даёт до 1024 новых токенов в пределах контекста. Для более длинного ответа выберите явный лимит.";Provider.LOCAL->"Локальный сервер сам решает, где остановиться; у Ollama размер контекста задаётся на сервере (OLLAMA_CONTEXT_LENGTH или num_ctx в Modelfile).";else->"Параметр лимита не отправляется, и провайдер использует свой предел."}),
                             style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("Лимит ответа — это не бюджет токенов задачи и не лимит шагов агента: они настраиваются в «Агент» → «Пределы задачи». Лимит ответа и системный промпт применяются к чату и агенту, контекст — к чату. Активная задача использует параметры, с которыми запущена.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     } }
@@ -204,7 +204,7 @@ import kotlin.math.roundToInt
 }
 @Composable private fun SettingsLink(title: String,subtitle: String,icon: ImageVector,click: ()->Unit) {
     Surface(onClick=click,shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainer,modifier=Modifier.fillMaxWidth().appear()) {
-        Row(Modifier.padding(18.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
             Icon(icon,null,tint=MaterialTheme.colorScheme.primary)
             Column(Modifier.weight(1f)) {Text(title,style=MaterialTheme.typography.titleMedium);Text(subtitle,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
             Icon(Icons.Outlined.ChevronRight,null)
@@ -220,7 +220,7 @@ private fun tokenLabel(tokens: Int): String = when {
 @Composable private fun SettingToggle(title: String,subtitle: String,checked: Boolean,change: (Boolean)->Unit) {
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {Text(title,style=MaterialTheme.typography.bodyLarge);Text(subtitle,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
-        Switch(checked,change,modifier=Modifier.testTag("toggle-$title"))
+        Switch(checked,change,modifier=Modifier.testTag("toggle-$title"),thumbContent=if(checked) {{Icon(Icons.Outlined.Check,null,Modifier.size(14.dp))}} else null)
     }
 }
 @Composable private fun SettingSlider(title: String,value: Float,range: ClosedFloatingPointRange<Float>,label: String,steps: Int=0,change: (Float)->Unit) {

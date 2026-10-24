@@ -296,8 +296,8 @@ import kotlin.math.roundToInt
         Surface(Modifier.padding(horizontal=12.dp,vertical=4.dp).fillMaxWidth(),shape=RoundedCornerShape(26.dp),
             color=MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=.76f),shadowElevation=6.dp,
             border=BorderStroke(.8.dp,MaterialTheme.colorScheme.outlineVariant.copy(alpha=.35f))) {
-            Column(Modifier.padding(horizontal=10.dp,vertical=6.dp).testTag("chat-composer")) {
-                Row(Modifier.padding(start=4.dp),verticalAlignment=Alignment.CenterVertically) {
+            Column(Modifier.padding(horizontal=10.dp,vertical=2.dp).testTag("chat-composer")) {
+                Row(Modifier.padding(start=4.dp).height(40.dp),verticalAlignment=Alignment.CenterVertically) {
                   Row(Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
                     FilterChip(!asAgent,{graph.setAgentMode(false)},label={Text("Чат")},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(15.dp))})
                     FilterChip(asAgent,{graph.setAgentMode(true)},label={Text("Агент")},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(15.dp))})
@@ -315,7 +315,7 @@ import kotlin.math.roundToInt
                 Row(Modifier.fillMaxWidth().padding(vertical=2.dp),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.Bottom) {
                     IconButton(onClick={picker.launch(arrayOf("*/*"))},enabled=!busy && !run.active && !importing && files.size<4,modifier=Modifier.size(44.dp).testTag("chat-attach")) {Icon(Icons.Outlined.Add,"Прикрепить файлы",Modifier.size(24.dp))}
                     BasicTextField(input,{if(it.text.length<=12_000) input=it else graph.uiMessage.value="Сократите сообщение до 12 000 символов."},
-                        Modifier.weight(1f).heightIn(min=44.dp).padding(vertical=11.dp).testTag("chat-input"),
+                        Modifier.weight(1f).heightIn(min=40.dp).padding(vertical=9.dp).testTag("chat-input"),
                         textStyle=MaterialTheme.typography.bodyLarge.copy(color=MaterialTheme.colorScheme.onSurface),maxLines=4,
                         cursorBrush=SolidColor(MaterialTheme.colorScheme.primary),decorationBox={field ->
                             Box {if(input.text.isEmpty()) Text(if(asAgent) "Какую задачу выполнить?" else t("Напиши сообщение…"),style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f),maxLines=1,overflow=TextOverflow.Ellipsis);field()}
@@ -439,7 +439,7 @@ import kotlin.math.roundToInt
 @Composable fun RunCard(run: RunState, approve: () -> Unit, reject: () -> Unit, pause: () -> Unit, stop: () -> Unit, maxSteps: Int = 20,retry: ()->Unit={},
     grantAccess: (dev.luma.agent.core.PermissionNeed)->Unit={}, skipAccess: ()->Unit={}, fallbackAccess: ()->Unit={}, launchSystemAction: (dev.luma.agent.core.SystemToolAction)->Unit={}, systemActionBusy: Boolean=false,
     elapsed: Long = 0, stats: dev.luma.agent.core.TokenStats? = null, meterActive: Boolean = false, orbSlot: Modifier = Modifier) {
-    SoftCard(Modifier.animateContentSize()) {
+    SoftCard(Modifier.animateContentSize(),legacy=true) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // The chat orb (44 dp) is drawn over this slot, so it and its particles stay inside the card.
             Spacer(orbSlot.size(44.dp))

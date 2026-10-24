@@ -21,11 +21,11 @@ import androidx.compose.ui.unit.dp
 @Composable fun LumaProgress(modifier: Modifier=Modifier,progress: (() -> Float)?=null) {
     val reduced=LocalReducedMotion.current
     if(progress==null) {
-        if(reduced) LinearProgressIndicator(progress={.35f},modifier=modifier)
-        else LinearWavyProgressIndicator(modifier=modifier)
+        if(reduced) LinearProgressIndicator(progress={.35f},modifier=modifier,drawStopIndicator={})
+        else LinearWavyProgressIndicator(modifier=modifier,amplitude=.35f,wavelength=40.dp,waveSpeed=12.dp,trackColor=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.48f))
     } else {
-        val amount by animateFloatAsState(progress().coerceIn(0f,1f),if(reduced) snap() else spring(dampingRatio=1f,stiffness=180f),label="download progress")
-        if(reduced) LinearProgressIndicator(progress={amount},modifier=modifier)
-        else LinearWavyProgressIndicator(progress={amount},modifier=modifier)
+        val amount by animateFloatAsState(progress().coerceIn(0f,1f),if(reduced) snap() else WavyProgressIndicatorDefaults.ProgressAnimationSpec,label="download progress")
+        if(reduced) LinearProgressIndicator(progress={amount},modifier=modifier,drawStopIndicator={})
+        else LinearWavyProgressIndicator(progress={amount},modifier=modifier,stopSize=0.dp,amplitude={.35f},wavelength=40.dp,waveSpeed=12.dp,trackColor=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.48f))
     }
 }

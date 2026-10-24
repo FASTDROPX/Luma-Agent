@@ -128,7 +128,7 @@ class AttachmentTest {
         original.delete();assertEquals("picked content",store.payload(item).text)
     }
     @Test fun providerAttachmentsUseNativeImageAndPdfPartsAndTextWorksEverywhere()=runTest {
-        for(provider in Provider.entries) {
+        for(provider in Provider.entries.filter {it!=Provider.DEVICE}) {
             val c=Connection("fake","model","http://127.0.0.1:1234/v1/",models=listOf(ModelInfo("model",vision=true)))
             val files=mutableListOf(AttachmentData("notes.txt","text/plain",text="file text"))
             if(provider!=Provider.DEEPSEEK) files+=AttachmentData("picture.jpg","image/jpeg","YQ==")

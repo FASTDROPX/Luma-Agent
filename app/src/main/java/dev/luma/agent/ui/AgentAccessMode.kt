@@ -14,7 +14,7 @@ import androidx.compose.ui.unit.dp
     var expanded by remember {mutableStateOf(false)}
     var confirmFull by remember {mutableStateOf(false)}
     Box {
-        TextButton(onClick={expanded=true},enabled=enabled,modifier=Modifier.fillMaxWidth().testTag("agent-access-mode"),
+        TextButton(onClick={expanded=true},enabled=enabled,modifier=Modifier.fillMaxWidth().height(34.dp).testTag("agent-access-mode"),
             contentPadding=PaddingValues(horizontal=8.dp,vertical=2.dp)) {
             Icon(if(confirmActions) Icons.Outlined.VerifiedUser else Icons.Outlined.Bolt,null,Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))

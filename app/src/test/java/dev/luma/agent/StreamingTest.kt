@@ -86,7 +86,7 @@ class StreamingTest {
     }
 
     @Test fun requestsAskForStreamingAndUsage() = runTest {
-        for (p in Provider.entries) {
+        for (p in Provider.entries.filter {it!=Provider.DEVICE}) {
             val api = ProviderClient { r ->
                 assertTrue(p.name, r.stream)
                 when (p) {

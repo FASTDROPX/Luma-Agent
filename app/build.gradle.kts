@@ -6,7 +6,9 @@ plugins {
 android {
     namespace = "dev.luma.agent"
     compileSdk = 35
-    defaultConfig { applicationId = "dev.luma.agent"; minSdk = 26; targetSdk = 35; versionCode = 20; versionName = "1.0.0" }
+    ndkVersion = "28.2.13676358"
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.31.6" } }
+    defaultConfig { applicationId = "dev.luma.agent"; minSdk = 26; targetSdk = 35; versionCode = 21; versionName = "1.0.0-test2"; ndk { abiFilters += listOf("arm64-v8a", "x86_64") }; externalNativeBuild { cmake { arguments += listOf("-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"); targets += "luma_llama" } } }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }

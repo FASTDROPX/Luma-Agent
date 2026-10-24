@@ -24,7 +24,7 @@ class SettingsEffectsTest {
         assertTrue(field.particles.all {it.x.isFinite() && kotlin.math.abs(it.x-600f)<30 && kotlin.math.abs(it.y-400f)<30})
     }
     @Test fun systemPromptReachesChatAndAgentSystemFieldsForEveryProvider() = runTest {
-        for(provider in Provider.entries) for(agent in listOf(false,true)) {
+        for(provider in Provider.entries.filter {it!=Provider.DEVICE}) for(agent in listOf(false,true)) {
             val connection=Connection("fake-key","test-model","http://127.0.0.1:1234/v1/",parameters=mapOf("test-model" to GenerationSettings(instruction="CUSTOM_STYLE_123")))
             val system=if(agent) ModelPrompts.agent(AppSettings(confirmActions=false),connection,false) else ModelPrompts.chat(connection)
             val api=ProviderClient {r ->
@@ -74,7 +74,7 @@ class SettingsEffectsTest {
         assertEquals(-1f,GenerationSettings(temperature=Float.NaN).sanitized().temperature)
     }
     @Test fun everyProviderReceivesItsOwnParameterNamesAndModelLimit() = runTest {
-        for(provider in Provider.entries) {
+        for(provider in Provider.entries.filter {it!=Provider.DEVICE}) {
             val api=ProviderClient {r ->
                 val body=r.body!!;val config=if(provider==Provider.GEMINI) body.getJSONObject("generationConfig") else body
                 val tokenField=when(provider) {Provider.GEMINI->"maxOutputTokens";Provider.OPENAI->"max_completion_tokens";else->"max_tokens"}

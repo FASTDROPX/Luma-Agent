@@ -9,7 +9,8 @@ enum class Provider(val label: String, val base: String, val keyRequired: Boolea
     OPENAI("OpenAI", "https://api.openai.com/v1/"),
     CLAUDE("Claude", "https://api.anthropic.com/v1/"),
     DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1/"),
-    LOCAL("Локальный сервер", "", false)
+    LOCAL("Локальный сервер", "", false),
+    DEVICE("На телефоне", "", false)
 }
 /**
  * [imageOutput]: the model can draw pictures in its reply. [outputLimit] is the provider's own maximum reply
@@ -90,7 +91,8 @@ data class AppSettings(
     val search: WebSearchSettings = WebSearchSettings(),
     /** «Глубокие размышления»: the agent analyses a failed step and tries another way instead of repeating it. */
     val deepThinking: Boolean = false,
-    val voice: VoiceSettings = VoiceSettings()
+    val voice: VoiceSettings = VoiceSettings(),
+    val localContext: Int = 8192, val localThreads: Int = 0
 ) {
     val formal: Boolean get() = tone == "formal"
     fun connection(p: Provider = provider) = connections[p] ?: Connection()
@@ -107,7 +109,7 @@ data class AppSettings(
             .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
             .put("maxSteps",maxSteps.coerceIn(5,30)).put("taskMinutes",taskMinutes.coerceIn(2,15)).put("unlimitedAgent", unlimitedAgent)
             .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH)).put("tokenMeter", tokenMeter)
-            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch).put("search", search.json()).put("deepThinking", deepThinking).put("voice",voice.json())
+            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch).put("search", search.json()).put("deepThinking", deepThinking).put("voice",voice.json()).put("localContext",localContext).put("localThreads",localThreads)
     }
     companion object {
         fun parse(json: JSONObject): AppSettings {
@@ -126,7 +128,7 @@ data class AppSettings(
                 json.optString("blockedWords").take(BlockedWords.MAX_LENGTH), json.optBoolean("tokenMeter", true),
                 json.optDouble("chatTextScale", 1.0).toFloat().let { if (it.isFinite()) it.coerceIn(.85f, 1.4f) else 1f }, json.optBoolean("haptics", true),
                 json.optInt("agentTokenLimit", 0).coerceIn(0, 5000), json.optString("tone", "friendly").takeIf { it in listOf("friendly", "formal") } ?: "friendly",
-                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"), WebSearchSettings.parse(json.optJSONObject("search")), json.optBoolean("deepThinking"), VoiceSettings.parse(json.optJSONObject("voice")))
+                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"), WebSearchSettings.parse(json.optJSONObject("search")), json.optBoolean("deepThinking"), VoiceSettings.parse(json.optJSONObject("voice")),json.optInt("localContext",8192).coerceIn(2048,16384),json.optInt("localThreads",0).coerceIn(0,8))
         }
     }
 }

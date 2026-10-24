@@ -38,20 +38,21 @@ import dev.luma.agent.core.*
 
 @Composable fun ConnectionsScreen(graph: AppGraph, onboarding: Boolean = false) {
     if (onboarding) { ApiConnectionsScreen(graph, true); return }
-    var localFiles by rememberSaveable { mutableStateOf(false) }
+    var modelTab by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) {
-            SegmentedButton(!localFiles, { localFiles = false }, SegmentedButtonDefaults.itemShape(0,2)) { Text("API-модели") }
-            SegmentedButton(localFiles, { localFiles = true }, SegmentedButtonDefaults.itemShape(1,2)) { Text("Hugging Face") }
+            SegmentedButton(modelTab==0, { modelTab=0 }, SegmentedButtonDefaults.itemShape(0,3)) { Text("API") }
+            SegmentedButton(modelTab==1, { modelTab=1 }, SegmentedButtonDefaults.itemShape(1,3)) { Text("На телефоне",maxLines=1) }
+            SegmentedButton(modelTab==2, { modelTab=2 }, SegmentedButtonDefaults.itemShape(2,3)) { Text("Каталог") }
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) { if (localFiles) HuggingFaceScreen(graph) else ApiConnectionsScreen(graph) }
+        Box(Modifier.weight(1f).fillMaxWidth()) { when(modelTab) {1->DeviceModelsScreen(graph);2->HuggingFaceScreen(graph);else->ApiConnectionsScreen(graph)} }
     }
 }
 
 @Composable private fun ApiConnectionsScreen(graph: AppGraph, onboarding: Boolean = false) {
     val settings by graph.vault.state.collectAsStateWithLifecycle()
     val catalog by graph.catalog.collectAsStateWithLifecycle()
-    val provider = settings.provider; val connection = settings.connection()
+    val provider = settings.provider.takeUnless {it==Provider.DEVICE} ?: Provider.LOCAL; val connection = settings.connection(provider)
     val context = LocalContext.current
     var key by remember(provider) { mutableStateOf(connection.key) }
     var endpoint by remember(provider) { mutableStateOf(connection.endpoint) }
@@ -79,7 +80,7 @@ import dev.luma.agent.core.*
         item { PageTitle("ПОДКЛЮЧЕНИЯ", "Провайдер и модель", "Ключ хранится на телефоне в Android Keystore. Платные запросы оплачиваются на стороне провайдера.") }
         item {
             Row(Modifier.fillMaxWidth().motionHorizontalScroll(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Provider.entries.forEach { p -> FilterChip(selected = provider == p, onClick = { graph.switchProvider(p) }, label = { Text(p.label) }, leadingIcon = if (provider == p) ({ Icon(Icons.Outlined.Check, null, Modifier.size(16.dp)) }) else null) }
+                Provider.entries.filter {it!=Provider.DEVICE}.forEach { p -> FilterChip(selected = provider == p, onClick = { graph.switchProvider(p) }, label = { Text(p.label) }, leadingIcon = if (provider == p) ({ Icon(Icons.Outlined.Check, null, Modifier.size(16.dp)) }) else null) }
             }
         }
         item {
@@ -189,7 +190,7 @@ import dev.luma.agent.core.*
         }
     }
     if (providers) AlertDialog(onDismissRequest = { providers = false }, title = { Text("Провайдер AI") }, text = {
-        MotionLazyColumn { items(Provider.entries) { p -> ListItem(headlineContent = { Text(p.label) }, trailingContent = { if (p == provider) Icon(Icons.Outlined.Check, "Выбрано") }, modifier = Modifier.clickable { graph.switchProvider(p); providers = false }) } }
+        MotionLazyColumn { items(Provider.entries.filter {it!=Provider.DEVICE}) { p -> ListItem(headlineContent = { Text(p.label) }, trailingContent = { if (p == provider) Icon(Icons.Outlined.Check, "Выбрано") }, modifier = Modifier.clickable { graph.switchProvider(p); providers = false }) } }
     }, confirmButton = { TextButton(onClick = { providers = false }) { Text("Закрыть") } })
     if (localKey) AlertDialog(onDismissRequest = { localKey = false }, title = { Text("Ключ сервера") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(t("Оставь пустым, если сервер не требует авторизации."), style = MaterialTheme.typography.bodySmall); SetupKeyField(key, editKey, reveal, toggleReveal, paste) }

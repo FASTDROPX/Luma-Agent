@@ -24,9 +24,11 @@ class AppGraph(val context: Context) {
     val chats = ChatStore(context)
     /** Unsent text and files of each chat; survive switching screens and restarts. */
     val drafts = DraftStore(context)
-    val api = ProviderClient()
     val hub = HuggingFaceClient()
     val downloads = HubDownloads(context)
+    val deviceModels = DeviceModels(context,downloads,scope)
+    val local = DeviceEngine(context,deviceModels) {vault.state.value}
+    val api = ProviderClient(device=local::generate)
     val agent = AgentController(context, scope, vault, chats, api)
     val voice = VoiceController(this)
     private val mutableCatalog = MutableStateFlow(CatalogState())
@@ -58,7 +60,19 @@ class AppGraph(val context: Context) {
     private var chatJob: Job? = null
     private var chatRevision = 0
     private var pendingAgentRequest: String? = null
+    init {scope.launch {local.stats.collect {value ->if(vault.state.value.provider==Provider.DEVICE) {
+        api.deviceStats(value)
+        if(chatBusy.value && value!=null) chatStatus.value=if(value.outputTokens>0) "На телефоне · ${value.outputTokens} токенов" else "Читаю запрос на телефоне · ${value.inputTokens} токенов"
+    }}}}
     init { scope.launch { try { chats.init() } catch (e: Exception) { uiMessage.value = "Не удалось открыть историю чатов." } }; vault.loadError?.let { uiMessage.value = it } }
+    suspend fun useDeviceModel(id: String) {
+        if(chatBusy.value || agent.state.value.active || voice.state.value.active) throw UserError("Сначала завершите текущую задачу или голосовой режим.")
+        deviceModels.file(id)
+        if(local.state.value.model!=id) local.unload()
+        val models=deviceModels.state.value.map {ModelInfo(it.id,it.name,outputLimit=0)}
+        vault.update {s -> val old=s.connection(Provider.DEVICE)
+            s.copy(provider=Provider.DEVICE,connections=s.connections+(Provider.DEVICE to old.copy(model=id,models=models))) }
+    }
     fun update(change: (AppSettings) -> AppSettings) { scope.launch { try { vault.update(change) } catch (e: Exception) { uiMessage.value = safeError(e) } } }
     /** «Чат» / «Агент» for the selected chat (or the next new one). */
     fun setAgentMode(agent: Boolean) { scope.launch { try { chats.setAgentMode(agent) } catch (e: Exception) { uiMessage.value = safeError(e) } } }
@@ -117,7 +131,7 @@ class AppGraph(val context: Context) {
             } catch (e: CancellationException) { }
             // The error belongs to the chat that sent the message, even if the user has opened another one.
             catch (e: Exception) { fail(chatId, e) }
-            finally { if (revision == chatRevision) { pendingAgentRequest = null; chatBusy.value = false; chatStartedAt.value = 0L } }
+            finally { if (revision == chatRevision) { pendingAgentRequest = null; chatBusy.value = false; chatStartedAt.value = 0L;chatStatus.value=null } }
         }
         return true
     }
@@ -202,5 +216,5 @@ class AppGraph(val context: Context) {
         if (token == null || pendingAgentRequest != token) return false
         pendingAgentRequest = null; return true
     }
-    fun cancelChat() { chatRevision++; pendingAgentRequest = null; chatJob?.cancel(); chatBusy.value = false; chatStartedAt.value = 0L }
+    fun cancelChat() { chatRevision++; pendingAgentRequest = null; chatJob?.cancel(); chatBusy.value = false; chatStartedAt.value = 0L;chatStatus.value=null }
 }

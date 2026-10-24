@@ -77,7 +77,7 @@ import kotlinx.coroutines.launch
             Text("Модели на телефон", Modifier.weight(1f), style=MaterialTheme.typography.titleMedium)
             IconButton(onClick={info=true}) { Icon(Icons.Outlined.Info,"Как использовать GGUF") }
         }
-        Text("Файлы GGUF · запуск через локальный AI-сервер", Modifier.padding(horizontal=20.dp), style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Скачайте GGUF и запустите внутри Luma", Modifier.padding(horizontal=20.dp), style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         Row(Modifier.padding(horizontal=20.dp), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             FilterChip(!library,{library=false},label={Text("Каталог")})
             FilterChip(library,{library=true},label={Text("Загрузки (${downloads.size})")},leadingIcon={Icon(Icons.Outlined.Download,null,Modifier.size(16.dp))},modifier=Modifier.testTag("hub-library"))
@@ -85,7 +85,7 @@ import kotlinx.coroutines.launch
         if(library) MotionLazyColumn(Modifier.weight(1f).fillMaxWidth(),contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             if(downloads.isEmpty()) item { Text(t("Пока пусто. Найди модель в каталоге и выбери файл GGUF."),color=MaterialTheme.colorScheme.onSurfaceVariant) }
             items(downloads,key={it.id}) { item ->
-                DownloadCard(item,share={action {
+                DownloadCard(item,run={action {graph.useDeviceModel("hf:${item.id}");graph.uiMessage.value="Модель выбрана. Перейдите в чат."}},share={action {
                     val file=graph.downloads.fileForShare(item.id)
                     val uri=FileProvider.getUriForFile(context,"${context.packageName}.model-files",file)
                     val intent=Intent(Intent.ACTION_SEND).setType("application/octet-stream").putExtra(Intent.EXTRA_STREAM,uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).apply { clipData=ClipData.newRawUri(item.file.name,uri) }
@@ -137,10 +137,10 @@ import kotlinx.coroutines.launch
         }
     },confirmButton={TextButton(enabled=!adding,onClick={adding=true;action { try { graph.downloads.enqueue(file,wifiOnly);pending=null;library=true } finally {adding=false} }}){Text(if(adding)"Начинаю…" else "Скачать")}},dismissButton={TextButton(enabled=!adding,onClick={pending=null}){Text("Отмена")}}) }
     removing?.let { item -> AlertDialog(onDismissRequest={removing=null},title={Text("Удалить модель?")},text={Text("${item.file.name}\nОсвободится ${sizeLabel(item.file.bytes)}. При необходимости файл можно скачать снова.")},confirmButton={TextButton(onClick={removing=null;action{graph.downloads.remove(item.id)}}){Text("Удалить")}},dismissButton={TextButton(onClick={removing=null}){Text("Отмена")}}) }
-    if(info) AlertDialog(onDismissRequest={info=false},title={Text("Модели Hugging Face")},text={Text("Здесь можно скачать публичные GGUF. Для работы модели требуется больше свободной оперативной памяти, чем размер файла.\n\nГотовый файл можно передать локальному AI-приложению. Для чата и агента Luma подключи его OpenAI-совместимый сервер во вкладке «API-модели» → «Локальный сервер». Встроенного запуска GGUF в этой версии нет.\n\nAndroid продолжает загрузку в фоне. Wi-Fi и состояние сети видны в «Загрузках». Удаление Luma удалит эти файлы; важные модели предварительно передай в другое приложение.",Modifier.motionScroll())},confirmButton={TextButton(onClick={info=false}){Text("Понятно")}})
+    if(info) AlertDialog(onDismissRequest={info=false},title={Text("Модели Hugging Face")},text={Text("Здесь можно скачать публичные GGUF. Для работы модели требуется больше свободной оперативной памяти, чем размер файла.\n\nГотовый файл запускается внутри Luma: нажмите «Использовать в Luma» в загрузках или выберите модель во вкладке «На телефоне». Для телефона выбирайте небольшие instruct-модели в Q4. Поддерживаются одиночные текстовые GGUF; для крупных моделей может не хватить оперативной памяти.\n\nAndroid продолжает загрузку в фоне. Wi-Fi и состояние сети видны в «Загрузках». Удаление Luma удалит эти файлы; важные модели предварительно передай в другое приложение.",Modifier.motionScroll())},confirmButton={TextButton(onClick={info=false}){Text("Понятно")}})
 }
 
-@Composable private fun DownloadCard(item: HubDownload,share: () -> Unit,retry: () -> Unit,remove: () -> Unit) {
+@Composable private fun DownloadCard(item: HubDownload,run: () -> Unit,share: () -> Unit,retry: () -> Unit,remove: () -> Unit) {
     SoftCard {
         Row(verticalAlignment=Alignment.Top) {
             Column(Modifier.weight(1f)) {Text(item.file.name,style=MaterialTheme.typography.titleSmall,maxLines=2,overflow=TextOverflow.Ellipsis);Text(item.file.repo,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)}
@@ -149,7 +149,10 @@ import kotlinx.coroutines.launch
         Text(item.message,style=MaterialTheme.typography.bodySmall,color=if(item.phase==HubPhase.ERROR)MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         if(item.phase==HubPhase.DOWNLOADING || item.phase==HubPhase.PAUSED) {val progress=(item.received.toDouble()/item.file.bytes).coerceIn(0.0,1.0).toFloat();LumaProgress(progress={progress},modifier=Modifier.fillMaxWidth());Text("${sizeLabel(item.received)} / ${sizeLabel(item.file.bytes)} · ${(progress*100).toInt()}%",style=MaterialTheme.typography.labelSmall)}
         if(item.phase==HubPhase.QUEUED) LumaProgress(Modifier.fillMaxWidth())
-        if(item.phase==HubPhase.READY) FilledTonalButton(onClick=share,modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.OpenInNew,null,Modifier.size(18.dp));Spacer(Modifier.width(8.dp));Text("Передать файл")}
+        if(item.phase==HubPhase.READY) {
+            FilledTonalButton(onClick=run,modifier=Modifier.fillMaxWidth()) {Icon(Icons.Outlined.PlayArrow,null,Modifier.size(18.dp));Spacer(Modifier.width(8.dp));Text("Использовать в Luma")}
+            OutlinedButton(onClick=share,modifier=Modifier.fillMaxWidth()){Icon(Icons.Outlined.OpenInNew,null,Modifier.size(18.dp));Spacer(Modifier.width(8.dp));Text("Передать файл")}
+        }
         if(item.phase==HubPhase.ERROR) OutlinedButton(onClick=retry,modifier=Modifier.fillMaxWidth()){Text("Повторить загрузку")}
     }
 }

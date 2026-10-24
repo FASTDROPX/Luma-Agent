@@ -81,7 +81,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
                     var environmentFolder = settings.folder
                     var environmentScreen = screen() != null
                     val modelKey = "${settings.provider}/${connection.model}"
-                    var native = settings.toolCalling == "native" || (settings.toolCalling == "auto" && modelKey !in jsonOnly)
+                    var native = settings.provider != Provider.DEVICE && (settings.toolCalling == "native" || (settings.toolCalling == "auto" && modelKey !in jsonOnly))
                     var lastUnknown: String? = null
                     var step = 0
                     // The token limit pauses the task; continuing allows one more portion of the same size.

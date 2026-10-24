@@ -46,13 +46,13 @@ private val Light = lightColorScheme(primary = Color(0xFF475D9C), onPrimary = Co
 @Composable fun PageTitle(eyebrow: String, title: String, subtitle: String) {
     Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(eyebrow, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Text(title, style = MaterialTheme.typography.headlineLarge)
+        Text(title, style = MaterialTheme.typography.headlineMedium)
         Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
-@Composable fun SoftCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+@Composable fun SoftCard(modifier: Modifier = Modifier, legacy: Boolean=false, content: @Composable ColumnScope.() -> Unit) {
+    Surface(modifier.fillMaxWidth(), shape = if(legacy) MaterialTheme.shapes.large else RoundedCornerShape(24.dp), color = if(legacy) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.padding(if(legacy) 20.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(if(legacy) 12.dp else 10.dp), content = content)
     }
 }
 

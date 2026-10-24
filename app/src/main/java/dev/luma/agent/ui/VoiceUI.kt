@@ -84,14 +84,16 @@ import dev.luma.agent.core.VoiceSettings
     val context=LocalContext.current
     var config by remember {mutableStateOf(settings.voice)}
     fun change(value: VoiceSettings) {config=value;graph.update {it.copy(voice=value)}}
+    val zipPicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri ->if(uri!=null) {graph.voice.stop();graph.voice.model.importZip(uri)}}
     LaunchedEffect(Unit) {graph.voice.output.loadVoices()}
     Column(verticalArrangement=Arrangement.spacedBy(14.dp)) {
         SoftCard {
             Text("Русский голосовой модуль",style=MaterialTheme.typography.titleMedium)
             Text("Vosk · 46 МБ загрузка · около 300 МБ памяти при работе. Нужен для локальной диктовки и вызова «Люма», в том числе с облачной речью.",style=MaterialTheme.typography.bodySmall)
-            if(download.busy) {LumaProgress(Modifier.fillMaxWidth(),progress={download.progress});Text("${(download.progress*100).toInt()} %");TextButton(onClick={graph.voice.model.cancel()}) {Text("Отменить загрузку")}}
+            if(download.busy) {LumaProgress(Modifier.fillMaxWidth(),progress={download.progress});Text("${download.phase} · ${(download.progress*100).toInt()} %");TextButton(onClick={graph.voice.model.cancel()}) {Text("Отменить загрузку")}}
             else if(download.ready) Text("Модель установлена",color=MaterialTheme.colorScheme.primary)
             else Button(onClick={graph.voice.model.download()},modifier=Modifier.testTag("download-voice-model")) {Icon(Icons.Outlined.Download,null);Spacer(Modifier.width(8.dp));Text("Скачать голосовую модель")}
+            if(!download.busy && !session.active) TextButton(onClick={zipPicker.launch(arrayOf("application/zip","application/octet-stream"))}) {Icon(Icons.Outlined.FolderZip,null);Spacer(Modifier.width(8.dp));Text("Установить модель из ZIP")}
             download.error?.let {Text(it,color=MaterialTheme.colorScheme.error)}
             Text("Vosk / Alpha Cephei · Apache 2.0",style=MaterialTheme.typography.labelSmall)
         }

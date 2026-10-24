@@ -90,7 +90,7 @@ private data class Destination(val title: String, val icon: ImageVector)
                         Column { Text(if (tab == 0) "Luma" else destinations[tab].title, style = MaterialTheme.typography.titleLarge)
                             // Tap the model line to switch models without leaving the chat.
                             if (tab == 0) Row(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).clickable { models = true }.testTag("header-model"), verticalAlignment = Alignment.CenterVertically) {
-                                OneLine(if (settings.connection().model.isBlank()) "Модель не выбрана" else "${shortModelName(settings.connection().model)} · ${if (settings.provider == dev.luma.agent.core.Provider.LOCAL) "локально" else settings.provider.label}",
+                                OneLine(if (settings.connection().model.isBlank()) "Модель не выбрана" else "${shortModelName(if(settings.provider==dev.luma.agent.core.Provider.DEVICE) settings.connection().models.firstOrNull {it.id==settings.connection().model}?.name ?: settings.connection().model else settings.connection().model)} · ${if (settings.provider == dev.luma.agent.core.Provider.LOCAL) "локально" else settings.provider.label}",
                                     Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Icon(Icons.Outlined.ExpandMore, "Сменить модель", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             } }
@@ -103,7 +103,7 @@ private data class Destination(val title: String, val icon: ImageVector)
                             if (settings.tokenMeter) TokenMeter(tokenStats, chatBusy || run.active, usage = usage)
                         }
                     }, expandedHeight = 56.dp, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)) },
-                    bottomBar = { if (!keyboardOpen) NavigationBar(modifier=Modifier.height(64.dp + with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }), containerColor = androidx.compose.ui.graphics.Color.Transparent, tonalElevation = 0.dp) { destinations.forEachIndexed { i, destination -> NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(destination.icon, destination.title) }, label = { Text(destination.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }) } } }
+                    bottomBar = { if (!keyboardOpen) ModernNavigation(destinations.map {it.title to it.icon},tab) {tab=it} }
                 ) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding)) {
                         if (run.active && (tab != 0 || selectedChat != run.chatId)) Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth().clickable { tab = 0; scope.launch { graph.chats.select(run.chatId) } }) {

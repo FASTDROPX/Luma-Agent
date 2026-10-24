@@ -13,3 +13,7 @@
 
 # Remote Markdown images are never loaded: the Markwon image module is not a dependency,
 # Markdown images render as links that open only on the user's tap.
+
+-keep class dev.luma.agent.core.LlamaNative { *; }
+-keep class dev.luma.agent.core.NativeReply { *; }
+-keep class dev.luma.agent.core.NativeProgress { *; }
