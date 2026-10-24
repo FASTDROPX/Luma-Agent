@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -57,7 +59,7 @@ import kotlin.math.*
         } else {flight.snapTo(1f);speed.snapTo(.4f)}
     }
     Box(Modifier.size(diameter).graphicsLayer {val pulse=sin(flight.value*PI.toFloat());scaleX=1f-pulse*.08f;scaleY=scaleX}.clip(CircleShape)
-        .semantics {contentDescription=if(active) "Остановить" else "Отправить"}
+        .semantics {contentDescription=if(active) tr("Остановить") else tr("Отправить")}
         .clickable(enabled=enabled || active,role=Role.Button,onClick=click),contentAlignment=Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val p=phase.value

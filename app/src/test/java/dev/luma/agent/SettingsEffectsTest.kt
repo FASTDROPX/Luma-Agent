@@ -24,7 +24,7 @@ class SettingsEffectsTest {
         assertTrue(field.particles.all {it.x.isFinite() && kotlin.math.abs(it.x-600f)<30 && kotlin.math.abs(it.y-400f)<30})
     }
     @Test fun systemPromptReachesChatAndAgentSystemFieldsForEveryProvider() = runTest {
-        for(provider in Provider.entries) for(agent in listOf(false,true)) {
+        for(provider in Provider.entries.filter {it!=Provider.DEVICE}) for(agent in listOf(false,true)) {
             val connection=Connection("fake-key","test-model","http://127.0.0.1:1234/v1/",parameters=mapOf("test-model" to GenerationSettings(instruction="CUSTOM_STYLE_123")))
             val system=if(agent) ModelPrompts.agent(AppSettings(confirmActions=false),connection,false) else ModelPrompts.chat(connection)
             val api=ProviderClient {r ->
@@ -41,17 +41,17 @@ class SettingsEffectsTest {
             assertEquals("ok",api.generate(provider,connection,listOf(Turn("user","hello")),system,agent))
         }
     }
-    @Test fun fullAccessSkipsOrdinaryStepsAndAskModeWaitsWhileImportantActionsStayExplicit() {
+    @Test fun fullAccessSkipsAllLumaConfirmationsAndAskModeStillWaits() {
         fun tool(name: String,args: JSONObject=JSONObject())=AgentReply.Tool(name,args,"")
         for(name in listOf("tap","tap_point","swipe","scroll","set_text","open_app","write_text","home","back")) {
             assertFalse(name,AgentApprovalPolicy.requiresApproval(tool(name),false))
             assertTrue(name,AgentApprovalPolicy.requiresApproval(tool(name),true))
         }
         for(name in listOf("screen","list_apps","read_text","list_files","wait")) assertFalse(AgentApprovalPolicy.requiresApproval(tool(name),true))
-        assertTrue(AgentApprovalPolicy.requiresApproval(tool("delete_file"),false))
-        assertTrue(AgentApprovalPolicy.requiresApproval(tool("move_file"),false))
-        assertTrue(AgentApprovalPolicy.requiresApproval(tool("write_text",JSONObject().put("overwrite",true)),false))
-        assertTrue(AgentApprovalPolicy.requiresApproval(tool("tap"),false,true))
+        assertFalse(AgentApprovalPolicy.requiresApproval(tool("delete_file"),false))
+        assertFalse(AgentApprovalPolicy.requiresApproval(tool("move_file"),false))
+        assertFalse(AgentApprovalPolicy.requiresApproval(tool("write_text",JSONObject().put("overwrite",true)),false))
+        assertFalse(AgentApprovalPolicy.requiresApproval(tool("tap"),false,true))
         assertFalse(AppSettings.parse(AppSettings(confirmActions=false).json()).confirmActions)
     }
     @Test fun oldVaultRetainsConnectionAndGetsCompatibleDefaults() {
@@ -74,7 +74,7 @@ class SettingsEffectsTest {
         assertEquals(-1f,GenerationSettings(temperature=Float.NaN).sanitized().temperature)
     }
     @Test fun everyProviderReceivesItsOwnParameterNamesAndModelLimit() = runTest {
-        for(provider in Provider.entries) {
+        for(provider in Provider.entries.filter {it!=Provider.DEVICE}) {
             val api=ProviderClient {r ->
                 val body=r.body!!;val config=if(provider==Provider.GEMINI) body.getJSONObject("generationConfig") else body
                 val tokenField=when(provider) {Provider.GEMINI->"maxOutputTokens";Provider.OPENAI->"max_completion_tokens";else->"max_tokens"}

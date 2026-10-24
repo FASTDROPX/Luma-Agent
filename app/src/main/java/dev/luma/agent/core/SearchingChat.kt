@@ -34,7 +34,7 @@ class SearchingChat(private val api: ProviderClient, private val web: WebTools) 
         var searches = 0; var pages = 0
         val reasoning = StringBuilder()
         val stats = mutableListOf<TokenStats>()
-        var native = true
+        var native = provider != Provider.DEVICE
         fun limitReached() = searches >= MAX_SEARCHES && pages >= MAX_PAGES
         suspend fun run(name: String, args: JSONObject): JSONObject = try {
             when (name) {

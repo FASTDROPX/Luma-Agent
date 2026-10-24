@@ -34,7 +34,8 @@ class AgentController(private val context: Context, private val scope: Coroutine
     /** Provider/model pairs whose server rejected native tool calls in this session; they use JSON commands. */
     private val jsonOnly = mutableSetOf<String>()
 
-    fun start(chat: Long, goal: String, finished: () -> Unit) {
+    fun start(chat: Long, goal: String, finished: () -> Unit) = start(chat,goal,null,finished)
+    fun start(chat: Long, goal: String, responseLanguage: String?,finished: () -> Unit) {
         if (job?.isActive == true) return
         val settings = vault.state.value; val connection = settings.connection()
         stoppedMessage = "Задача остановлена."
@@ -42,6 +43,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
         extras = ExtendedTools(context, ::requestSystemAction)
         mutable.value = RunState(active = true, stage = "Подготавливаю задачу", chatId = chat, startedAt = android.os.SystemClock.elapsedRealtime())
         job = scope.launch {
+            val generated=linkedMapOf<String,GeneratedFile>()
             try {
                 withTimeout(if (settings.unlimitedAgent) Long.MAX_VALUE else settings.taskMinutes.coerceIn(2,15) * 60_000L) {
                     val history = chats.history(chat, 8).dropWhile { it.role != "user" }
@@ -80,7 +82,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
                     var environmentFolder = settings.folder
                     var environmentScreen = screen() != null
                     val modelKey = "${settings.provider}/${connection.model}"
-                    var native = settings.toolCalling == "native" || (settings.toolCalling == "auto" && modelKey !in jsonOnly)
+                    var native = settings.provider != Provider.DEVICE && (settings.toolCalling == "native" || (settings.toolCalling == "auto" && modelKey !in jsonOnly))
                     var lastUnknown: String? = null
                     var step = 0
                     // The token limit pauses the task; continuing allows one more portion of the same size.
@@ -95,7 +97,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
                             environment = withContext(Dispatchers.IO) { TaskEnvironment.capture(context, screen() != null, environmentFolder) }
                         }
                         val generation = generateRecovering(settings, connection, step, native, { memory.turns(vault.state.value.screenshots) },
-                            { useNative -> ModelPrompts.agent(vault.state.value, connection, screen() != null, environment, useNative) }) {
+                            { useNative -> ModelPrompts.agent(vault.state.value, connection, screen() != null, environment, useNative)+ModelPrompts.voiceLanguage(responseLanguage) }) {
                             native = false; jsonOnly += modelKey
                         }
                         val raw = generation.text
@@ -108,7 +110,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
                         }
                         awaitRunning()
                         when (val reply = reply(generation, native)) {
-                            is AgentReply.Final -> { chats.append(chat, "assistant", reply.text, reasoning = generation.reasoning, stats = generation.stats); update("Готово", step); return@withTimeout }
+                            is AgentReply.Final -> { chats.append(chat, "assistant", reply.text, reasoning = generation.reasoning, stats = generation.stats,generatedFiles=generated.values.toList()); update("Готово", step); return@withTimeout }
                             is AgentReply.Tool -> {
                                 val label = describe(reply)
                                 // The agent card appears with the first action; the overlay with the first one on the screen.
@@ -123,11 +125,11 @@ class AgentController(private val context: Context, private val scope: Coroutine
                                 val triedBefore = attemptKey?.let { attempted[it] }
                                 if (invalid == null && triedBefore == null) {
                                     val blocked = screen()?.sensitive(reply.name, reply.args, vault.state.value.blockedWords)
-                                    if (repeatUnknown || AgentApprovalPolicy.requiresApproval(reply, vault.state.value.confirmActions, blocked != null)) {
+                                    if ((repeatUnknown && vault.state.value.confirmActions) || AgentApprovalPolicy.requiresApproval(reply, vault.state.value.confirmActions, blocked != null)) {
                                         val details = confirmationDetails(reply) + blocked?.let { "\n$it" }.orEmpty() +
                                             if (repeatUnknown) "\nРезультат такого же предыдущего шага неизвестен: он мог уже выполниться. Повторить?" else ""
                                         val accepted = requestApproval(Approval(label, details, ToolRegistry[reply.name]?.screen == true || reply.name in setOf("tap", "tap_point", "scroll", "swipe", "set_text", "long_press")))
-                                        if (!accepted) { chats.append(chat, "assistant", "Действие отменено вами. Задача остановлена."); return@withTimeout }
+                                        if (!accepted) { chats.append(chat, "assistant", "Действие отменено вами. Задача остановлена.",generatedFiles=generated.values.toList()); return@withTimeout }
                                     }
                                 }
                                 awaitRunning()
@@ -153,6 +155,9 @@ class AgentController(private val context: Context, private val scope: Coroutine
                                         ToolResult(JSONObject().put("status", ToolStatus.UNKNOWN).put("message", "Действие не завершилось вовремя; оно могло выполниться. Проверьте состояние, не повторяя его."))
                                     }
                                 val status = normalize(result.json)
+                                if(status==ToolStatus.DONE && result.json.optBoolean("verified",true)) {
+                                    GeneratedFile.parse(result.json.optJSONObject("artifact"))?.let {file -> generated[file.uri]=file}
+                                }
                                 lastUnknown = if (status == ToolStatus.UNKNOWN && ToolRegistry[reply.name]?.sideEffect != false) fingerprint else null
                                 if (reply.skipped > 0) result.json.put("protocolNote", "Выполнена только первая команда, ещё ${reply.skipped} отброшено. Присылай одну команду за ответ и планируй следующий шаг по новому результату.")
                                 val took = android.os.SystemClock.elapsedRealtime() - stepStarted
@@ -162,7 +167,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
                                 memory.record(reply, raw, result.json, result.image)
                                 // Without a workspace no file step can work; the user gets the way to pick a folder at once, without further model calls.
                                 if (result.json.optString("code") == FolderTools.WORKSPACE_UNAVAILABLE) {
-                                    chats.append(chat, "assistant", result.json.optString("message") + "\n\n" + result.json.optString("userAction") + " Затем повторите задачу. Уже выполненные шаги сохранены.")
+                                    chats.append(chat, "assistant", result.json.optString("message") + "\n\n" + result.json.optString("userAction") + " Затем повторите задачу. Уже выполненные шаги сохранены.",generatedFiles=generated.values.toList())
                                     update("Нужна рабочая папка", step); return@withTimeout
                                 }
                                 result.frame?.let { lastFrame = it }
@@ -185,11 +190,11 @@ class AgentController(private val context: Context, private val scope: Coroutine
                     throw UserError("Достигнут предел ${settings.maxSteps.coerceIn(5,30)} шагов. Уточните задачу и продолжите новым сообщением.")
                 }
             } catch (e: TimeoutCancellationException) {
-                chats.append(chat, "assistant", "Время задачи истекло. Выполненные действия сохранены; продолжите новой командой.")
+                chats.append(chat, "assistant", "Время задачи истекло. Выполненные действия сохранены; продолжите новой командой.",generatedFiles=generated.values.toList())
             } catch (e: CancellationException) {
-                withContext(kotlinx.coroutines.NonCancellable) { chats.append(chat, "assistant", stoppedMessage) }
+                withContext(kotlinx.coroutines.NonCancellable) { chats.append(chat, "assistant", stoppedMessage,generatedFiles=generated.values.toList()) }
             } catch (e: Exception) {
-                val message = safeError(e); chats.append(chat, "assistant", message); mutable.value = mutable.value.copy(error = message)
+                val message = safeError(e); chats.append(chat, "assistant", message,generatedFiles=generated.values.toList()); mutable.value = mutable.value.copy(error = message)
             } finally {
                 extras?.close(); extras = null; systemDecision?.cancel(); systemDecision = null
                 approval?.cancel(); approval = null;retry?.cancel();retry=null;access?.cancel();access=null
@@ -199,6 +204,8 @@ class AgentController(private val context: Context, private val scope: Coroutine
         }
     }
     fun stop(message: String = "Задача остановлена. Уже выполненные действия не отменяются.") { stoppedMessage = message; job?.cancel() }
+    suspend fun stopAndJoin() {stop();job?.join()}
+    suspend fun awaitCompletion() {job?.join()}
     fun togglePause() { if (mutable.value.active) mutable.value = mutable.value.copy(paused = !mutable.value.paused) }
     fun decide(accepted: Boolean) { approval?.complete(accepted) }
     fun retryRequest() {retry?.complete(Unit)}
@@ -263,6 +270,10 @@ class AgentController(private val context: Context, private val scope: Coroutine
     private suspend fun requestSystemAction(action: SystemToolAction): SystemToolResult {
         val decision = CompletableDeferred<SystemToolResult>(); systemDecision = decision
         mutable.value = mutable.value.copy(acting = true, systemAction = action, screen = false)
+        if(!vault.state.value.confirmActions && (context.applicationContext as? dev.luma.agent.LumaApp)?.graph?.appVisible==false) {
+            runCatching {context.startActivity(android.content.Intent(context,dev.luma.agent.MainActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))}
+        }
         return try { decision.await() }
         finally { systemDecision = null; mutable.value = mutable.value.copy(systemAction = null) }
     }
@@ -313,6 +324,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
     }
     /** Shows the cursor, glow and Stop pill and waits (up to 1.5 s) until Stop is on screen before the first screen action. */
     private suspend fun showOverlay() {
+        if (!mutable.value.screen) delay(80) // Give the run card a frame to place its orb before handing it off.
         mutable.value = mutable.value.copy(screen = true)
         val driver = screen() ?: return
         var waited = 0

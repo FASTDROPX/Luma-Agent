@@ -48,7 +48,7 @@ class WorkspaceFilesTest {
         File(TestDocumentsProvider.root, "a.txt").writeText("старое")
         val refused = failure("write_text", JSONObject().put("path", "a.txt").put("text", "новое"))
         assertEquals("exists", refused.code); assertEquals("старое", File(TestDocumentsProvider.root, "a.txt").readText())
-        assertTrue(AgentApprovalPolicy.requiresApproval(AgentReply.Tool("write_text", JSONObject().put("path", "a.txt").put("text", "x").put("overwrite", true), ""), confirmActions = false))
+        assertFalse(AgentApprovalPolicy.requiresApproval(AgentReply.Tool("write_text", JSONObject().put("path", "a.txt").put("text", "x").put("overwrite", true), ""), confirmActions = false))
         assertEquals(true, run("write_text", JSONObject().put("path", "a.txt").put("text", "новое").put("overwrite", true)).getBoolean("replaced"))
         assertEquals("новое", File(TestDocumentsProvider.root, "a.txt").readText())
         run("append_text", JSONObject().put("path", "a.txt").put("text", "\nещё"))
@@ -95,10 +95,26 @@ class WorkspaceFilesTest {
             agent.run("Создай test.txt в своей папке")
             assertEquals(2, agent.requests.size)
             assertEquals("Создано Luma", File(TestDocumentsProvider.root, "test.txt").readText())
+            val artifact=agent.chats.messages.value.last().generatedFiles.single()
+            assertEquals("test.txt",artifact.name)
+            assertEquals("Создано Luma".toByteArray().size.toLong(),artifact.size)
+            assertTrue(artifact.uri.startsWith("content://"));assertTrue(artifact.created>0)
+
             assertTrue((agent.screen as FakeScreen).executed.isEmpty())
             val system = agent.requests[0].body!!.getJSONArray("messages").getJSONObject(0).getString("content")
             assertTrue(system.contains("workspace:/ = «Documents»"))
         } finally { agent.close() }
+    }
+
+    @Test fun fullAccessDeletesAnOwnedFileWithoutAnyLumaApproval() {
+        val file=File(TestDocumentsProvider.root,"remove-me.txt").apply {writeText("temporary test file")}
+        val agent=AgentRun(context,configure={it.copy(confirmActions=false,folder=folder)}) {i,_ ->
+            if(i==0) Replies.openAiCall("delete_file",JSONObject().put("path","remove-me.txt")) else Replies.openAiText("Удалил файл.")
+        }
+        try {
+            agent.run("Удали remove-me.txt") {throw AssertionError("Полный доступ не должен спрашивать подтверждение")}
+            assertFalse(file.exists());assertEquals("Удалил файл.",agent.chats.messages.value.last().text)
+        } finally {agent.close()}
     }
 
     @Test fun missingFolderShowsACardAndCanBeSkippedWithoutOpeningTheScreen() {

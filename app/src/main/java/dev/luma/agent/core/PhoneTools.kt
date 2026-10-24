@@ -27,7 +27,7 @@ import java.util.Locale
 /**
  * Agent tools that use the optional permissions: contacts, calls, SMS, call log, location, calendar, media and app
  * usage. Each is gated by the permission it needs (see [ToolRegistry] access and the chat «выдайте доступ» card), and
- * the ones that act on the world — a call, an SMS, a new calendar event — are confirmed by the user first.
+ * the ones that act on the world — a call, an SMS, a new calendar event — are confirmed first in the ask mode. Full access skips Luma approvals.
  */
 class PhoneTools(private val context: Context, private val sms: SmsSender = RealSms) {
     /** Sending an SMS is injected so it can be checked without a real radio. */

@@ -3,8 +3,8 @@ package dev.luma.agent
 import kotlin.math.*
 
 internal data class CursorSeed(val x: Float,val y: Float,val z: Float,val size: Float,val shade: Float)
-internal data class OrbAnchor(val x: Float,val y: Float,val radius: Float,val at: Long,val seeds: ()->List<CursorSeed>)
-internal data class OrbHandoff(val x: Float,val y: Float,val radius: Float,val seeds: List<CursorSeed>)
+internal data class OrbAnchor(val x: Float,val y: Float,val radius: Float,val at: Long,val immersive: Boolean=false,val seeds: ()->List<CursorSeed>)
+internal data class OrbHandoff(val x: Float,val y: Float,val radius: Float,val seeds: List<CursorSeed>,val immersive: Boolean=false)
 
 /**
  * Satellites of the agent cursor, moving like the welcome-screen arrival: while the cursor flies they

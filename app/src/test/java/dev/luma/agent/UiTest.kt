@@ -33,13 +33,44 @@ import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk=[35],application=LumaApp::class,qualifiers="w411dp-h891dp-mdpi")
+@Config(sdk=[35],application=LumaApp::class,qualifiers="w411dp-h891dp-mdpi",shadows=[HostAtomicFileShadow::class])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class UiTest {
     @get:Rule val compose=createAndroidComposeRule<androidx.activity.ComponentActivity>()
     private lateinit var graph: AppGraph
-    @Before fun setup(){TestKeys.install();graph=(ApplicationProvider.getApplicationContext<LumaApp>()).graph;runBlocking{graph.vault.update{it.copy(reducedMotion=true,dynamicColors=false,theme="dark")}}}
+    @Before fun setup(){I18n.choose("ru");TestKeys.install();graph=(ApplicationProvider.getApplicationContext<LumaApp>()).graph;runBlocking{graph.vault.update{it.copy(reducedMotion=true,dynamicColors=false,theme="dark",language="ru")}}}
     @After fun teardown(){graph.scope.coroutineContext[kotlinx.coroutines.Job]?.cancel();TestKeys.restore()}
+    @Test fun voiceAgentCardStaysInsideConversation() {
+        runBlocking {graph.vault.update {it.copy(onboarded=true)}}
+        graph.voice.state.value=VoiceState("conversation","Думаю","Открой контакты")
+        graph.voice.screen.value=true
+        @Suppress("UNCHECKED_CAST")
+        val state=AgentController::class.java.getDeclaredField("mutable").apply {isAccessible=true}.get(graph.agent) as kotlinx.coroutines.flow.MutableStateFlow<RunState>
+        state.value=RunState(active=true,acting=true,stage="Открываю контакты",startedAt=1)
+        compose.setContent {AppRoot(graph)}
+        compose.onNodeWithTag("conversation-screen").assertIsDisplayed()
+        compose.onNodeWithTag("conversation-run-card").assertIsDisplayed()
+        compose.onNodeWithText("Luma работает").assertIsDisplayed()
+        compose.onNodeWithText("Открываю контакты").assertIsDisplayed()
+        assertTrue(graph.voice.screen.value)
+    }
+    @Test fun composerHasTwoModesAndOptionsStayInASheet() {
+        runBlocking {graph.vault.update {it.copy(onboarded=true)}}
+        compose.setContent {AppRoot(graph)}
+        compose.onAllNodesWithTag("chat-web-search").assertCountEquals(0)
+        compose.onAllNodesWithTag("chat-deep-thinking").assertCountEquals(0)
+        compose.onNodeWithTag("chat-options").performClick()
+        compose.onNodeWithTag("chat-web-search").assertIsDisplayed().performClick()
+        compose.waitUntil(5000) {graph.vault.state.value.webSearch}
+        compose.onNodeWithTag("chat-deep-thinking").assertIsDisplayed()
+    }
+    @Test fun accessAndOnboardingBothOfferTheBatchRequest() {
+        compose.setContent {val settings by graph.vault.state.collectAsStateWithLifecycle();LumaTheme(settings) {AccessScreen(graph)}}
+        compose.onNodeWithTag("request-all-access").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Запросить все доступы?").assertIsDisplayed()
+        compose.onNodeWithText("Отмена").performClick()
+        compose.onAllNodesWithTag("optional-access-all").assertCountEquals(0)
+    }
     @Test fun onboardingExplainsAppAndOffersExplicitClipboardAction() {
         compose.setContent{AppRoot(graph)}
         compose.onNodeWithText("Чат с ИИ\nи помощь на телефоне").assertIsDisplayed()
@@ -62,7 +93,7 @@ class UiTest {
         containedText("Доступ включаешь ты","setup-welcome")
         screenshot("07-small-welcome-130")
         compose.onNodeWithTag("setup-next").performClick()
-        listOf("setup-screen-access","setup-folder-access","setup-notification-access","setup-access-options").forEach { contained(it,"setup-access") }
+        listOf("request-all-access","setup-screen-access","setup-folder-access","setup-notification-access","setup-access-options").forEach { compose.onNodeWithTag(it).performScrollTo(); contained(it,"setup-access") }
         containedText("Доступ для агента","setup-access")
         screenshot("08-small-permissions-130")
         compose.onNodeWithTag("setup-screen-access").performClick()
@@ -278,7 +309,9 @@ class UiTest {
         compose.onNodeWithTag("model-instructions").performTextInput("Отвечай кратко")
         compose.onNodeWithText("Сохранить промпт").performScrollTo().performClick()
         compose.waitUntil(5000) {graph.vault.state.value.connection().generation().instruction=="Отвечай кратко"}
-        assertEquals("Отвечай кратко",SettingsVault(compose.activity).state.value.connection().generation().instruction)
+        val savedVault=SettingsVault(compose.activity)
+        assertNull(savedVault.loadError,savedVault.loadError)
+        assertEquals("Отвечай кратко",savedVault.state.value.connection().generation().instruction)
         screenshot("24-settings-model")
     }
     @Test @Config(qualifiers="w360dp-h640dp-mdpi")
@@ -293,9 +326,18 @@ class UiTest {
         contained("agent-access-mode","chat-composer")
         compose.onNodeWithTag("agent-access-mode").performClick()
         compose.onNodeWithTag("access-mode-full").performClick()
+        compose.onNodeWithTag("confirm-full-access").assertIsDisplayed()
+        assertTrue(graph.vault.state.value.confirmActions)
+        compose.onNodeWithText("Отмена").performClick()
+        assertTrue(graph.vault.state.value.confirmActions)
+        compose.onNodeWithTag("agent-access-mode").performClick()
+        compose.onNodeWithTag("access-mode-full").performClick()
+        compose.onNodeWithTag("confirm-full-access").performClick()
         compose.waitUntil(5000) {!graph.vault.state.value.confirmActions}
         compose.onNodeWithText("Полный доступ").assertIsDisplayed()
-        assertFalse(SettingsVault(compose.activity).state.value.confirmActions)
+        val savedVault=SettingsVault(compose.activity)
+        assertNull(savedVault.loadError,savedVault.loadError)
+        assertFalse(savedVault.state.value.confirmActions)
         screenshot("38-chat-full-access")
         compose.onNodeWithTag("agent-access-mode").performClick()
         compose.onNodeWithTag("access-mode-ask").performClick()

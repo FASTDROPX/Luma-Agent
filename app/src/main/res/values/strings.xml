@@ -1,0 +1,4 @@
+<resources>
+    <string name="accessibility_label">Luma · управление телефоном</string>
+    <string name="tile_label">Панель Luma</string>
+</resources>

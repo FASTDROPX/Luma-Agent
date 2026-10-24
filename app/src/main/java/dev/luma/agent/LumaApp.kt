@@ -16,7 +16,7 @@ data class SharedContent(val text: String, val uris: List<android.net.Uri>)
 data class ConnectionCheck(val busy: Boolean = false, val reply: String? = null, val stats: TokenStats? = null, val error: String? = null)
 class LumaApp : Application() {
     lateinit var graph: AppGraph; private set
-    override fun onCreate() { super.onCreate(); graph = AppGraph(this) }
+    override fun onCreate() { super.onCreate(); graph = AppGraph(this);I18n.initialize(this,graph.vault.state.value.language) }
 }
 class AppGraph(val context: Context) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -24,10 +24,13 @@ class AppGraph(val context: Context) {
     val chats = ChatStore(context)
     /** Unsent text and files of each chat; survive switching screens and restarts. */
     val drafts = DraftStore(context)
-    val api = ProviderClient()
     val hub = HuggingFaceClient()
     val downloads = HubDownloads(context)
+    val deviceModels = DeviceModels(context,downloads,scope)
+    val local = DeviceEngine(context,deviceModels) {vault.state.value}
+    val api = ProviderClient(device=local::generate)
     val agent = AgentController(context, scope, vault, chats, api)
+    val voice = VoiceController(this)
     private val mutableCatalog = MutableStateFlow(CatalogState())
     val catalog = mutableCatalog.asStateFlow()
     val chatBusy = MutableStateFlow(false)
@@ -47,12 +50,29 @@ class AppGraph(val context: Context) {
     val appVisible: Boolean get() = visibleScreens.get() > 0
     internal var orbAnchor: OrbAnchor?=null
     private var pendingHandoff: OrbHandoff?=null
-    internal fun takeOrbHandoff(): OrbHandoff?=pendingHandoff.also {pendingHandoff=null}
+    internal fun takeOrbHandoff(): OrbHandoff? {
+        // Capture where the orb is NOW: after sending it has moved from the welcome screen into the run card.
+        val live=orbAnchor?.takeIf {android.os.SystemClock.uptimeMillis()-it.at<2000 && (appVisible || it.immersive)}
+            ?.let {OrbHandoff(it.x,it.y,it.radius,it.seeds(),it.immersive)}
+        return (live ?: pendingHandoff).also {pendingHandoff=null}
+    }
     private var catalogJob: Job? = null; private var catalogRevision = 0
     private var chatJob: Job? = null
     private var chatRevision = 0
     private var pendingAgentRequest: String? = null
+    init {scope.launch {local.stats.collect {value ->if(vault.state.value.provider==Provider.DEVICE) {
+        api.deviceStats(value)
+        if(chatBusy.value && value!=null) chatStatus.value=if(value.outputTokens>0) "На телефоне · ${value.outputTokens} токенов" else "Читаю запрос на телефоне · ${value.inputTokens} токенов"
+    }}}}
     init { scope.launch { try { chats.init() } catch (e: Exception) { uiMessage.value = "Не удалось открыть историю чатов." } }; vault.loadError?.let { uiMessage.value = it } }
+    suspend fun useDeviceModel(id: String) {
+        if(chatBusy.value || agent.state.value.active || voice.state.value.active) throw UserError("Сначала завершите текущую задачу или голосовой режим.")
+        deviceModels.file(id)
+        if(local.state.value.model!=id) local.unload()
+        val models=deviceModels.state.value.map {ModelInfo(it.id,it.name,outputLimit=0)}
+        vault.update {s -> val old=s.connection(Provider.DEVICE)
+            s.copy(provider=Provider.DEVICE,connections=s.connections+(Provider.DEVICE to old.copy(model=id,models=models))) }
+    }
     fun update(change: (AppSettings) -> AppSettings) { scope.launch { try { vault.update(change) } catch (e: Exception) { uiMessage.value = safeError(e) } } }
     /** «Чат» / «Агент» for the selected chat (or the next new one). */
     fun setAgentMode(agent: Boolean) { scope.launch { try { chats.setAgentMode(agent) } catch (e: Exception) { uiMessage.value = safeError(e) } } }
@@ -88,38 +108,56 @@ class AppGraph(val context: Context) {
             } catch (e: CancellationException) { throw e } catch (e: Exception) { ConnectionCheck(error = safeError(e)) }
         }
     }
-    fun send(text: String, asAgent: Boolean,files: List<Attachment> = emptyList()): Boolean {
+    fun send(text: String, asAgent: Boolean,files: List<Attachment> = emptyList(),targetChat: Long? = null,responseLanguage: String?=null): Boolean {
         val clean = text.trim().ifBlank {if(files.isNotEmpty()) "Проанализируй вложенные файлы" else ""}
         if (clean.isBlank() || chatBusy.value || agent.state.value.active) return false
         if (clean.length > 12_000) { uiMessage.value = "Сообщение слишком длинное. Сократите его до 12 000 символов."; return false }
         if(files.size>4 || files.sumOf {it.size}>16_000_000) {uiMessage.value="Не больше 4 файлов и 16 МБ в одном сообщении.";return false}
         val settings = vault.state.value; val connection = settings.connection()
         if (connection.model.isBlank()) { uiMessage.value = "Сначала подключите провайдера и выберите модель."; return false }
-        if(asAgent) pendingHandoff=orbAnchor?.let {OrbHandoff(it.x,it.y,it.radius,it.seeds())}
-        chatBusy.value = true; chatStartedAt.value = android.os.SystemClock.elapsedRealtime()
+        if(asAgent) pendingHandoff=orbAnchor?.let {OrbHandoff(it.x,it.y,it.radius,it.seeds(),it.immersive)}
+        chatBusy.value = true; chatStatus.value=null;chatStartedAt.value = android.os.SystemClock.elapsedRealtime()
         val revision = ++chatRevision
         chatJob = scope.launch {
             var chatId: Long? = null
             try {
-                val id = chats.ensure(clean); chatId = id; chats.append(id, "user", clean,files)
+                val id = targetChat ?: chats.ensure(clean); chatId = id; chats.append(id, "user", clean,files)
                 if (asAgent) {
                     val token = java.util.UUID.randomUUID().toString()
                     pendingAgentRequest = token
-                    context.startForegroundService(Intent(context, AgentTaskService::class.java).putExtra("chat", id).putExtra("goal", clean).putExtra("request", token))
+                    context.startForegroundService(Intent(context, AgentTaskService::class.java).putExtra("chat", id).putExtra("goal", clean).putExtra("request", token).putExtra("responseLanguage",responseLanguage))
                     withTimeout(5000) { agent.state.first { it.active && it.chatId == id } }
-                } else answer(id)
+                } else answer(id,responseLanguage)
             } catch (e: CancellationException) { }
             // The error belongs to the chat that sent the message, even if the user has opened another one.
             catch (e: Exception) { fail(chatId, e) }
-            finally { if (revision == chatRevision) { pendingAgentRequest = null; chatBusy.value = false; chatStartedAt.value = 0L } }
+            finally { if (revision == chatRevision) { pendingAgentRequest = null; chatBusy.value = false; chatStartedAt.value = 0L;chatStatus.value=null } }
         }
         return true
     }
+    /** Voice owns its request and chat even when the visible screen changes. */
+    suspend fun voiceTurn(text: String,asAgent: Boolean,chat: Long?): Pair<Long,String> {
+        if(chatBusy.value || agent.state.value.active) throw UserError("Дождитесь завершения текущего ответа.")
+        val id=chat ?: chats.ensure(text)
+        val after=chats.lastAssistant(id)?.id ?: 0L
+        if(!send(text,asAgent,targetChat=id,responseLanguage=vault.state.value.voice.outputLanguage)) throw UserError(uiMessage.value ?: "Не удалось отправить голосовой запрос.")
+        val revision=chatRevision
+        try {
+            chatJob?.join()
+            if(asAgent) agent.awaitCompletion()
+            val reply=chats.lastAssistant(id)?.takeIf {it.id>after} ?: throw UserError("Ответ не получен. Проверьте чат.")
+            if(reply.failed) throw UserError(reply.text)
+            return id to reply.text.ifBlank {"Ответ с вложением готов в чате."}
+        } catch(e: CancellationException) {
+            if(chatRevision==revision) {cancelChat();if(asAgent) agent.stop()}
+            throw e
+        }
+    }
     /** Asks the model for the next answer of [chat] from its history and stores text, reasoning and pictures. */
-    private suspend fun answer(chat: Long) {
+    private suspend fun answer(chat: Long,responseLanguage: String?=null) {
         val settings = vault.state.value; val connection = settings.connection()
         val turns = chats.history(chat, connection.generation().contextTurns).dropWhile { it.role != "user" }
-        val system = ModelPrompts.chat(connection, settings.formal)
+        val system = ModelPrompts.chat(connection, settings.formal)+ModelPrompts.voiceLanguage(responseLanguage)
         val painter = connection.models.firstOrNull { it.id == connection.model }?.imageOutput == true
         // Search: the provider's own where it has one (unless Luma's is chosen), Luma's tools for every other model.
         val reply = if (settings.webSearch && !painter && !settings.search.native(settings.provider)) try {
@@ -154,7 +192,7 @@ class AppGraph(val context: Context) {
     fun regenerate(chat: Long, replace: Long?) {
         if (chatBusy.value || agent.state.value.active) return
         if (vault.state.value.connection().model.isBlank()) { uiMessage.value = "Сначала подключите провайдера и выберите модель."; return }
-        chatBusy.value = true; chatStartedAt.value = android.os.SystemClock.elapsedRealtime()
+        chatBusy.value = true; chatStatus.value=null;chatStartedAt.value = android.os.SystemClock.elapsedRealtime()
         val revision = ++chatRevision
         chatJob = scope.launch {
             try {
@@ -163,13 +201,20 @@ class AppGraph(val context: Context) {
                 answer(chat)
             } catch (e: CancellationException) { }
             catch (e: Exception) { fail(chat, e) }
-            finally { if (revision == chatRevision) { chatBusy.value = false; chatStartedAt.value = 0L } }
+            finally { if (revision == chatRevision) { chatBusy.value = false; chatStartedAt.value = 0L;chatStatus.value=null } }
         }
     }
     fun deleteMessage(id: Long) { scope.launch { runCatching { chats.deleteMessage(id) }.onFailure { uiMessage.value = safeError(it) } } }
+    suspend fun clearHistory() {
+        voice.stop()
+        val pendingChat=chatJob
+        cancelChat();agent.stopAndJoin();pendingChat?.join()
+        // Cancellation can append a final status; wait for it before deleting the referenced chat rows.
+        chats.clearAll()
+    }
     internal fun consumeAgentRequest(token: String?): Boolean {
         if (token == null || pendingAgentRequest != token) return false
         pendingAgentRequest = null; return true
     }
-    fun cancelChat() { chatRevision++; pendingAgentRequest = null; chatJob?.cancel(); chatBusy.value = false; chatStartedAt.value = 0L }
+    fun cancelChat() { chatRevision++; pendingAgentRequest = null; chatJob?.cancel(); chatBusy.value = false; chatStartedAt.value = 0L;chatStatus.value=null }
 }

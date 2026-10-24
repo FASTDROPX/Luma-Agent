@@ -1,0 +1,13 @@
+# Модели распознавания 1.0.0
+
+- Русский: [GigaAM v2 CTC int8](https://huggingface.co/csukuangfj/sherpa-onnx-nemo-ctc-giga-am-v2-russian-2025-04-19/tree/f5555086f28ef11d600e30d76b61d75fd9685196), исходная [GigaAM](https://github.com/salute-developers/GigaAM), MIT, GigaChat Team. Модель 236457977 байт, SHA-256 `d0ce4aef25f58d495781ee8f05320d9e51b821f47804e07aa6549b53a72f67e8`.
+- Английский, немецкий и французский: [Whisper Small int8](https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/tree/8f3c18b358db4d1f2fc1eae49d75cd20989e4309), исходная [OpenAI Whisper](https://github.com/openai/whisper), MIT. Энкодер 112442483 байт, SHA `4cbe7b22fa9026b843b60a68640c747de05bafb1a11b57edc0e66c232d9f33a9`; декодер 262226114 байт, SHA `acad50b5c782696e91b55914cc5ab4f756f1532f76e22aa6fc615f39fb69a8ee`.
+- Китайский: [SenseVoice Small int8](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/tree/355f4d4884d8afd08aef04b9007a8556d7b463b2), исходная [SenseVoice](https://github.com/FunAudioLLM/SenseVoice), Apache 2.0. Модель 237115547 байт, SHA `12ca1a2ae7ecf3e0019ef2822307ee0b5cadc9196569e379b4c4026f8205276d`.
+- Выделение речи: [Silero VAD через sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models), MIT. 643854 байт, SHA `9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6`.
+- Инференс: sherpa-onnx 1.12.20 / ONNX Runtime. Полные хеши всех файлов и словарей находятся в `VoiceModel.kt`. Веса скачиваются пользователем; не копируются из PocketPal и не входят в APK.
+
+При сравнении на одном эмуляторе, одном русском голосе Piper и пяти подготовленных фразах GigaAM верно передал все слова, включая «Люма». Whisper изменил «твои дела» на «твое дело», а также изменил форму слова «поставь». Это небольшой синтетический контроль, а не оценка качества на реальном микрофоне или универсальный рейтинг моделей.
+
+Нативные проверки требуют подготовленных, проверенных по хешу весов в `no_backup/voice/<pack.name>`, маркера `.verified` с LF между SHA-256, голоса Piper Irina в `no_backup/speech-packs` и официального тестового `example.wav` для независимой проверки живой записи. Ничего из этих весов не добавляется в репозиторий.
+
+Мультиязычная проверка использует ограничение ошибки слов/иероглифов 25% на подготовленных коротких фразах, а не обещание дословной точности. В отдельных прогонах Whisper менял немецкое Browser на Brause и французское demain на demandes. Китайский Whisper дал 42% ошибки и заменён на SenseVoice. Все результаты относятся к конкретной синтетической записи; качество на живом микрофоне проверяется отдельно.

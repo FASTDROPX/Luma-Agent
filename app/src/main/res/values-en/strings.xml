@@ -1,0 +1,5 @@
+<resources>
+    <string name="accessibility_label">Luma · phone control</string>
+    <string name="tile_label">Luma panel</string>
+    <string name="accessibility_description">Luma performs tasks you start: it reads available screen elements, taps, scrolls and types. Screenshots may be sent to your selected AI model if you enable them. The service does not record the screen in the background. Stop a task from the panel, app or notification.</string>
+</resources>

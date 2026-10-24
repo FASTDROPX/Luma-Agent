@@ -128,6 +128,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                 items.put(JSONObject().put("id", id).put("text", text).put("description", description)
                     .put("bounds", JSONArray(listOf(scaledX(rect.left), scaledY(rect.top), scaledX(rect.right), scaledY(rect.bottom))))
                     .put("clickable", node.isClickable).put("editable", node.isEditable).put("scrollable", node.isScrollable).put("enabled", node.isEnabled)
+                    .put("class",node.className).apply { if(Build.VERSION.SDK_INT>=28 && node.isHeading) put("heading",true) }
                     .apply { if (node.isLongClickable) put("longClickable", true) }
                     // A link inside a message is not a node of its own; tapping the message often opens its menu instead.
                     .apply { ScreenLinks.find(text + " " + description).takeIf { it.isNotEmpty() }?.let { put("links", JSONArray(it)) } })
@@ -253,11 +254,20 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
             }
             "tap" -> {
                 pointAtNode(args)
-                if (!click(node(args))) throw UserError("Элемент не поддерживает нажатие. Обновите экран.")
+                val target=node(args)
+                // A WebView label often has no ACTION_CLICK. Clicking a distant clickable ancestor can
+                // activate the site header instead of the result title. Web content and non-clickable
+                // labels get a single physical tap on THIS label, even if WebView advertises ACTION_CLICK.
+                if (ScreenTapTarget.needsGesture(target) || !target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    val rect=Rect();target.getBoundsInScreen(rect)
+                    if(!rect.intersect(0,0,physicalWidth,physicalHeight) || rect.isEmpty) throw UserError("Элемент за пределами экрана. Обновите screen.")
+                    gesture(rect.exactCenterX(),rect.exactCenterY(),rect.exactCenterX(),rect.exactCenterY(),80) {graph.agent.awaitAction();node(args)}
+                }
                 visuals?.pulse()
             }
             "long_press" -> {
                 pointAtNode(args)
+                visuals?.hold()
                 val target = node(args)
                 if (!longClick(target)) {
                     // No long-click action: hold a finger on the element's centre instead.
@@ -279,6 +289,7 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
                 val node = node(args); val direction = args.requiredString("direction")
                 val action = when (direction) { "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD; "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD; else -> throw UserError("Неверное направление прокрутки.") }
                 if (!node.isScrollable || !node.performAction(action)) throw UserError("Элемент не прокручивается в эту сторону.")
+                visuals?.scroll(direction=="down")
             }
             "tap_point", "swipe" -> {
                 validateSnapshot(args)
@@ -374,13 +385,16 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         val path = Path().apply { moveTo(x1, y1); if (moves) lineTo(x2, y2) }
         panel?.temporarilyHide(true)
         try {
+            // Let WindowManager remove the touchable panel before dispatching the finger gesture.
+            delay(64)
+            recheck()
             withTimeout(5000) { suspendCancellableCoroutine<Unit> { continuation ->
                 val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, duration)).build()
                 val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
                     override fun onCompleted(gestureDescription: GestureDescription?) { if (continuation.isActive) continuation.resume(Unit) }
                     override fun onCancelled(gestureDescription: GestureDescription?) { if (continuation.isActive) continuation.resumeWithException(ToolFailure(ToolStatus.UNKNOWN, "Android прервал жест; он мог выполниться частично. Проверьте экран.")) }
                 }, null)
-                if (accepted) { visuals?.pulse(); if (moves) visuals?.traceTo(x2, y2) }
+                if (accepted) { visuals?.pulse(); if (moves) visuals?.traceTo(x2, y2,duration) else if(duration>=500) visuals?.hold(duration) }
                 if (!accepted && continuation.isActive) continuation.resumeWithException(ToolFailure(ToolStatus.ERROR, "Android не принял жест."))
             } }
         } catch (e: TimeoutCancellationException) {
@@ -395,16 +409,6 @@ class AgentAccessibilityService : AccessibilityService(), ScreenDriver {
         repeat(7) {
             val node = current ?: return false
             if (node.isLongClickable && node.isEnabled && node.isVisibleToUser && node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)) return true
-            current = node.parent
-        }
-        return false
-    }
-    private fun click(target: AccessibilityNodeInfo): Boolean {
-        if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
-        var current: AccessibilityNodeInfo? = target.parent
-        repeat(6) {
-            val node = current ?: return false
-            if (node.isClickable && node.isEnabled && node.isVisibleToUser && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
             current = node.parent
         }
         return false

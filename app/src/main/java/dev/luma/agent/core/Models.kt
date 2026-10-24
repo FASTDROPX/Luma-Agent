@@ -9,7 +9,8 @@ enum class Provider(val label: String, val base: String, val keyRequired: Boolea
     OPENAI("OpenAI", "https://api.openai.com/v1/"),
     CLAUDE("Claude", "https://api.anthropic.com/v1/"),
     DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1/"),
-    LOCAL("Локальный сервер", "", false)
+    LOCAL("Локальный сервер", "", false),
+    DEVICE("На телефоне", "", false)
 }
 /**
  * [imageOutput]: the model can draw pictures in its reply. [outputLimit] is the provider's own maximum reply
@@ -49,7 +50,7 @@ data class VisualSettings(val palette: String = "sky", val blackBackground: Bool
     val smoothInput: Boolean = true, val motionBlur: Boolean = false, val blurStrength: Float = .45f,
     val particleCount: Int = 144, val orbitSpeed: Float = 1f, val returnDelay: Float = 3f,
     val cursor: Boolean = true, val edgeGlow: Boolean = true, val glowIntensity: Float = .7f) {
-    fun sanitized() = copy(palette = palette.takeIf { it in listOf("sky","lilac","mint","peach") } ?: "sky",
+    fun sanitized() = copy(palette = palette.takeIf { it in listOf("sky","lilac","mint","peach","violet","cobalt","rose","teal","citrus","orange","graphite") } ?: "sky",
         blurStrength = blurStrength.finiteClamp(.1f,1f,.45f), particleCount = particleCount.coerceIn(36,180),
         orbitSpeed = orbitSpeed.finiteClamp(.4f,2f,1f), returnDelay = returnDelay.finiteClamp(2f,6f,3f),
         glowIntensity = glowIntensity.finiteClamp(.2f,1f,.7f))
@@ -89,7 +90,10 @@ data class AppSettings(
     val webSearch: Boolean = false,
     val search: WebSearchSettings = WebSearchSettings(),
     /** «Глубокие размышления»: the agent analyses a failed step and tries another way instead of repeating it. */
-    val deepThinking: Boolean = false
+    val deepThinking: Boolean = false,
+    val voice: VoiceSettings = VoiceSettings(),
+    val localContext: Int = 8192, val localThreads: Int = 0,
+    val language: String = "system"
 ) {
     val formal: Boolean get() = tone == "formal"
     fun connection(p: Provider = provider) = connections[p] ?: Connection()
@@ -100,13 +104,13 @@ data class AppSettings(
     }
     fun json(): JSONObject {
         val config = JSONObject(); connections.forEach { (p, c) -> config.put(p.name, c.json()) }
-        return JSONObject().put("version", 2).put("onboarded", onboarded).put("provider", provider.name)
+        return JSONObject().put("version", 2).put("language",language).put("onboarded", onboarded).put("provider", provider.name)
             .put("connections", config).put("theme", theme).put("dynamicColors", dynamicColors)
             .put("reducedMotion", reducedMotion).put("panel", panel).put("screenshots", screenshots)
             .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
             .put("maxSteps",maxSteps.coerceIn(5,30)).put("taskMinutes",taskMinutes.coerceIn(2,15)).put("unlimitedAgent", unlimitedAgent)
             .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH)).put("tokenMeter", tokenMeter)
-            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch).put("search", search.json()).put("deepThinking", deepThinking)
+            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch).put("search", search.json()).put("deepThinking", deepThinking).put("voice",voice.json()).put("localContext",localContext).put("localThreads",localThreads)
     }
     companion object {
         fun parse(json: JSONObject): AppSettings {
@@ -125,7 +129,8 @@ data class AppSettings(
                 json.optString("blockedWords").take(BlockedWords.MAX_LENGTH), json.optBoolean("tokenMeter", true),
                 json.optDouble("chatTextScale", 1.0).toFloat().let { if (it.isFinite()) it.coerceIn(.85f, 1.4f) else 1f }, json.optBoolean("haptics", true),
                 json.optInt("agentTokenLimit", 0).coerceIn(0, 5000), json.optString("tone", "friendly").takeIf { it in listOf("friendly", "formal") } ?: "friendly",
-                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"), WebSearchSettings.parse(json.optJSONObject("search")), json.optBoolean("deepThinking"))
+                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"), WebSearchSettings.parse(json.optJSONObject("search")), json.optBoolean("deepThinking"), VoiceSettings.parse(json.optJSONObject("voice")),json.optInt("localContext",8192).coerceIn(2048,16384),json.optInt("localThreads",0).coerceIn(0,8),
+                json.optString("language","system").takeIf {it in setOf("system","ru","en","zh","de","fr")} ?: "system")
         }
     }
 }
@@ -145,7 +150,8 @@ fun safeError(error: Throwable): String = if (error is UserError) error.message 
 data class Turn(val role: String, val text: String, val image: String? = null, val attachments: List<AttachmentData> = emptyList(),
     val toolCalls: List<ToolCall> = emptyList(), val toolCallId: String? = null, val toolName: String? = null)
 data class ChatMessage(val id: Long, val role: String, val text: String, val timestamp: Long, val attachments: List<Attachment> = emptyList(),
-    val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false, val search: WebSearch? = null)
+    val reasoning: String = "", val stats: TokenStats? = null, val failed: Boolean = false, val search: WebSearch? = null,
+    val generatedFiles: List<GeneratedFile> = emptyList())
 data class Conversation(val id: Long, val title: String, val updated: Long, val pinned: Boolean = false, val agent: Boolean = false)
 data class Approval(val title: String, val details: String, val background: Boolean = false)
 /** An access a tool needs that is off: the chat shows a «выдайте доступ» card, and the task continues once it is granted. */

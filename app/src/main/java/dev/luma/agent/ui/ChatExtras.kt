@@ -52,7 +52,7 @@ val LocalChatTextScale = compositionLocalOf { 1f }
 val LocalHaptics = compositionLocalOf { true }
 @Composable fun tone(friendly: String, formal: String): String = if (LocalFormal.current) formal else friendly
 /** A text in the chosen tone: «Выберите» becomes «Выбери» for the friendly one and back. */
-@Composable fun t(text: String): String = Tone.adapt(text, LocalFormal.current)
+@Composable fun t(text: String): String = tr(Tone.adapt(text, LocalFormal.current))
 
 /** Short haptic ticks; silent when the setting is off. */
 enum class Haptic { Send, Confirm, Finish, Error }
@@ -73,13 +73,13 @@ class MessageActions(val copy: () -> Unit, val share: () -> Unit, val delete: ()
 
 @Composable fun MessageMenu(expanded: Boolean, dismiss: () -> Unit, actions: MessageActions, user: Boolean, select: (() -> Unit)? = null) {
     DropdownMenu(expanded, dismiss, shape = RoundedCornerShape(16.dp), modifier = Modifier.testTag("message-menu")) {
-        DropdownMenuItem(text = { Text("Копировать") }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) }, onClick = { dismiss(); actions.copy() })
-        select?.let { DropdownMenuItem(text = { Text("Выделить текст") }, leadingIcon = { Icon(Icons.Outlined.TextFields, null) }, onClick = { dismiss(); it() }) }
-        DropdownMenuItem(text = { Text("Поделиться") }, leadingIcon = { Icon(Icons.Outlined.Share, null) }, onClick = { dismiss(); actions.share() })
-        actions.repeat?.let { DropdownMenuItem(text = { Text(if (user) "Спросить ещё раз" else "Повторить") }, leadingIcon = { Icon(Icons.Outlined.Replay, null) }, onClick = { dismiss(); it() }) }
-        actions.regenerate?.let { DropdownMenuItem(text = { Text("Перегенерировать") }, leadingIcon = { Icon(Icons.Outlined.Autorenew, null) }, onClick = { dismiss(); it() }) }
+        DropdownMenuItem(text = { Text(tr("Копировать")) }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) }, onClick = { dismiss(); actions.copy() })
+        select?.let { DropdownMenuItem(text = { Text(tr("Выделить текст")) }, leadingIcon = { Icon(Icons.Outlined.TextFields, null) }, onClick = { dismiss(); it() }) }
+        DropdownMenuItem(text = { Text(tr("Поделиться")) }, leadingIcon = { Icon(Icons.Outlined.Share, null) }, onClick = { dismiss(); actions.share() })
+        actions.repeat?.let { DropdownMenuItem(text = { Text(if (user) tr("Спросить ещё раз") else tr("Повторить")) }, leadingIcon = { Icon(Icons.Outlined.Replay, null) }, onClick = { dismiss(); it() }) }
+        actions.regenerate?.let { DropdownMenuItem(text = { Text(tr("Перегенерировать")) }, leadingIcon = { Icon(Icons.Outlined.Autorenew, null) }, onClick = { dismiss(); it() }) }
         HorizontalDivider()
-        DropdownMenuItem(text = { Text("Удалить", color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) }, onClick = { dismiss(); actions.delete() })
+        DropdownMenuItem(text = { Text(tr("Удалить"), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) }, onClick = { dismiss(); actions.delete() })
     }
 }
 
@@ -92,8 +92,8 @@ class MessageActions(val copy: () -> Unit, val share: () -> Unit, val delete: ()
                 Text(t(message.text), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (canRetry) FilledTonalButton(onClick = retry, Modifier.testTag("retry-${message.id}"), contentPadding = PaddingValues(start = 14.dp, end = 18.dp)) { Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Переотправить") }
-                TextButton(onClick = delete) { Text("Убрать", maxLines = 1, softWrap = false) }
+                if (canRetry) FilledTonalButton(onClick = retry, Modifier.testTag("retry-${message.id}"), contentPadding = PaddingValues(start = 14.dp, end = 18.dp)) { Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(tr("Переотправить")) }
+                TextButton(onClick = delete) { Text(tr("Убрать"), maxLines = 1, softWrap = false) }
             }
         }
     }
@@ -108,7 +108,7 @@ class MessageActions(val copy: () -> Unit, val share: () -> Unit, val delete: ()
             val shape = RoundedCornerShape(18.dp)
             Box(Modifier.widthIn(max = 360.dp).fillMaxWidth().clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable { open = image }.testTag("generated-image")) {
                 val b = bitmap
-                if (b == null) Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp) }
+                if (b == null) Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) { LumaLoading(Modifier.size(28.dp)) }
                 else Image(b, image.name, Modifier.fillMaxWidth().aspectRatio(b.width.toFloat() / b.height.coerceAtLeast(1)), contentScale = ContentScale.Fit)
             }
         }
@@ -135,9 +135,9 @@ class MessageActions(val copy: () -> Unit, val share: () -> Unit, val delete: ()
                 }.graphicsLayer { scaleX = scale; scaleY = scale; translationX = offsetX; translationY = offsetY }, contentScale = ContentScale.Fit)
             }
             Row(Modifier.align(Alignment.TopEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = { scope.launch { note = saveToGallery(context, store, image) } }) { Icon(Icons.Outlined.Download, "Сохранить в галерею", tint = Color.White) }
-                IconButton(onClick = { shareFile(context, store, image) }) { Icon(Icons.Outlined.Share, "Поделиться", tint = Color.White) }
-                IconButton(onClick = close) { Icon(Icons.Outlined.Close, "Закрыть", tint = Color.White) }
+                IconButton(onClick = { scope.launch { note = saveToGallery(context, store, image) } }) { Icon(Icons.Outlined.Download, tr("Сохранить в галерею"), tint = Color.White) }
+                IconButton(onClick = { shareFile(context, store, image) }) { Icon(Icons.Outlined.Share, tr("Поделиться"), tint = Color.White) }
+                IconButton(onClick = close) { Icon(Icons.Outlined.Close, tr("Закрыть"), tint = Color.White) }
             }
             note?.let { Text(t(it), Modifier.align(Alignment.BottomCenter).padding(24.dp).background(Color.Black.copy(alpha = .6f), RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 8.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium) }
         }
@@ -161,11 +161,11 @@ private suspend fun saveToGallery(context: Context, store: AttachmentStore, imag
             }
             val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("no uri")
             context.contentResolver.openOutputStream(uri)?.use { out -> store.file(image).inputStream().use { it.copyTo(out) } } ?: error("no stream")
-            "Сохранено в «Изображения/Luma»"
+            tr("Сохранено в «Изображения/Luma»")
         } else {
-            shareFile(context, store, image); "Выберите, куда сохранить"
+            shareFile(context, store, image); tr("Выберите, куда сохранить")
         }
-    }.getOrElse { "Не удалось сохранить изображение" }
+    }.getOrElse { tr("Не удалось сохранить изображение") }
 }
 
 /** Shares an attachment through a temporary copy that FileProvider may expose. */
@@ -176,11 +176,11 @@ fun shareFile(context: Context, store: AttachmentStore, item: Attachment) {
         store.file(item).copyTo(copy, overwrite = true)
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.model-files", copy)
         context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType(item.mime).putExtra(Intent.EXTRA_STREAM, uri)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Поделиться").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), tr("Поделиться")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
 fun shareText(context: Context, text: String) {
-    runCatching { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Поделиться").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    runCatching { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), tr("Поделиться")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
 
 /** Expandable list of the task's steps with their time and speed. */
@@ -192,7 +192,7 @@ fun shareText(context: Context, text: String) {
         Row(Modifier.clip(RoundedCornerShape(10.dp)).clickable { open = !open }.padding(vertical = 4.dp).testTag("run-log"), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.FormatListBulleted, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(6.dp))
-            Text("Журнал · ${log.size} ${steps(log.size)}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(tr("Журнал · {0} {1}" ,log.size,steps(log.size)), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp).graphicsLayer { rotationZ = turn }, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
@@ -201,19 +201,19 @@ fun shareText(context: Context, text: String) {
                     Icon(if (entry.ok) Icons.Outlined.CheckCircleOutline else Icons.Outlined.ErrorOutline, null, Modifier.size(15.dp).padding(top = 2.dp),
                         tint = if (entry.ok) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error)
                     Text("${entry.number}. ${entry.label}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(listOfNotNull(formatSeconds(entry.millis), entry.outputPerSecond?.let { "↓ ${formatRate(it)} т/с" }).joinToString(" · "),
+                    Text(listOfNotNull(formatSeconds(entry.millis), entry.outputPerSecond?.let { tr("↓ {0} т/с" ,formatRate(it)) }).joinToString(" · "),
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
     }
 }
-private fun steps(n: Int) = when { n % 10 == 1 && n % 100 != 11 -> "шаг"; n % 10 in 2..4 && n % 100 !in 12..14 -> "шага"; else -> "шагов" }
+private fun steps(n: Int) = when { n % 10 == 1 && n % 100 != 11 -> tr("шаг"); n % 10 in 2..4 && n % 100 !in 12..14 -> tr("шага"); else -> tr("шагов") }
 
 /** The whole message as plain selectable text, for picking out a part of it. */
 @Composable fun SelectTextDialog(text: String, close: () -> Unit) {
-    AlertDialog(onDismissRequest = close, confirmButton = { TextButton(onClick = close) { Text("Готово") } },
-        title = { Text(t("Выделите нужное")) },
+    AlertDialog(onDismissRequest = close, confirmButton = { TextButton(onClick = close) { Text(tr("Готово")) } },
+        title = { Text(t(tr("Выделите нужное"))) },
         text = { androidx.compose.foundation.text.selection.SelectionContainer {
             Text(text, Modifier.heightIn(max = 420.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()), style = MaterialTheme.typography.bodyMedium)
         } })

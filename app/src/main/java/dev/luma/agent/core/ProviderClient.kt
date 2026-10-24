@@ -38,7 +38,7 @@ internal val localCleartextOnly = Interceptor { chain ->
     if (!url.isHttps && !isPrivateHost(url.host)) throw CleartextBlocked()
     chain.proceed(chain.request())
 }
-class ProviderClient internal constructor(private val sender: (suspend (WireRequest) -> JSONObject)? = null) {
+class ProviderClient internal constructor(private val device: (suspend (Connection,List<Turn>,String)->Generation)? = null, private val sender: (suspend (WireRequest) -> JSONObject)? = null) {
     private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
         .callTimeout(100, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
         .addInterceptor(localCleartextOnly).build()
@@ -48,6 +48,7 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
     private val slowClient = client.newBuilder().readTimeout(150, TimeUnit.SECONDS).callTimeout(240, TimeUnit.SECONDS).build()
     suspend fun models(provider: Provider, connection: Connection): List<ModelInfo> = try {
         withTimeout(20_000) {
+            if(provider==Provider.DEVICE) return@withTimeout connection.models
             val base = base(provider, connection); val headers = headers(provider, connection)
             val result = mutableListOf<ModelInfo>()
             if (provider == Provider.OPENROUTER) send(WireRequest(base + "key", headers, catalog = true))
@@ -112,6 +113,7 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
     private val mutableStats = kotlinx.coroutines.flow.MutableStateFlow<TokenStats?>(null)
     /** Speed of the latest successful reply, shared by chat and agent. */
     val stats: kotlinx.coroutines.flow.StateFlow<TokenStats?> = mutableStats
+    internal fun deviceStats(value: TokenStats?) {mutableStats.value=value}
 
     suspend fun generate(provider: Provider, connection: Connection, turns: List<Turn>, system: String, agent: Boolean = false,
         onRetry: (Int,Long)->Unit={_,_->}): String = generateDetailed(provider, connection, turns, system, agent, onRetry).text
@@ -123,6 +125,12 @@ class ProviderClient internal constructor(private val sender: (suspend (WireRequ
     suspend fun generateDetailed(provider: Provider, connection: Connection, turns: List<Turn>, system: String, agent: Boolean = false,
         onRetry: (Int,Long)->Unit={_,_->}, tools: List<ToolSpec>? = null, webSearch: Boolean = false): Generation {
         if (connection.model.isBlank()) throw UserError("Выберите модель в разделе «Подключения».")
+        if(provider==Provider.DEVICE) {
+            if(!tools.isNullOrEmpty()) throw ProviderFailure(400,message="Для встроенного движка используется текстовый протокол инструментов.")
+            val result=(device ?: throw UserError("Встроенный движок не подключён."))(connection,turns.map(::plainTurn),system)
+            mutableStats.value=result.stats
+            return result
+        }
         val latestUser=turns.indexOfLast {it.role=="user"}
         val painterModel = connection.models.firstOrNull { it.id == connection.model }?.imageOutput == true
         val painter = !agent && painterModel

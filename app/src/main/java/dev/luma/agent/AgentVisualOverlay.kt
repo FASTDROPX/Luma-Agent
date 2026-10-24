@@ -134,6 +134,7 @@ internal class AgentVisualOverlay(private val service: AgentAccessibilityService
     suspend fun travelTo(x: Float,y: Float) {
         controller.awaitAction()
         val layer=canvas ?: return
+        layer.setIntroTarget(x,y)
         layer.advanceVisualFrame(SystemClock.uptimeMillis())
         while(layer.introRunning) {
             controller.awaitAction();delay(16);layer.advanceVisualFrame(SystemClock.uptimeMillis());layer.invalidate()
@@ -165,7 +166,9 @@ internal class AgentVisualOverlay(private val service: AgentAccessibilityService
     fun updateTyping(caret: TypingCaret) {canvas?.typeAt(caret)}
     fun endTyping() {canvas?.stopTyping()}
     /** Follow the actual injected swipe rather than jumping directly to its end. */
-    fun traceTo(x: Float,y: Float) {canvas?.traceTo(x,y)}
+    fun traceTo(x: Float,y: Float,duration: Long=420) {canvas?.traceTo(x,y,duration)}
+    fun hold(duration: Long=800) {canvas?.hold(duration)}
+    fun scroll(down: Boolean) {canvas?.scroll(down)}
     suspend fun prepareGesture(x1: Float,y1: Float,x2: Float,y2: Float) {
         if(avoidStop(x1,y1,x2,y2)) delay(32) // Allow WindowManager to place the control before injection.
         controller.awaitAction()
@@ -250,6 +253,8 @@ internal class AgentCanvas(context: Context): View(context) {
     private var entered=false
     private var startedAt=0L
     private var origin: OrbHandoff?=null
+    private var introTarget: android.graphics.PointF?=null
+    fun setIntroTarget(x: Float,y: Float) {if(!entered || introRunning) introTarget=android.graphics.PointF(x,y)}
     private var particles: CursorParticleField?=null
     internal val particleCount get()=particles?.particles?.size ?: 0
     internal val particleField get()=particles
@@ -284,19 +289,37 @@ internal class AgentCanvas(context: Context): View(context) {
     internal val caretBox=RectF()
     init {importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS;isClickable=false;isFocusable=false;setWillNotDraw(false)}
     fun setOrigin(value: OrbHandoff?) {if(!entered) origin=value}
-    fun configure(run: RunState,settings: AppSettings) {this.run=run;this.settings=settings;invalidate()}
+    fun configure(run: RunState,settings: AppSettings) {this.run=run;this.settings=settings;if(reduced() || !settings.visuals.cursor || !run.active) gestureKind="";invalidate()}
     fun pulse() {
         if(!settings.visuals.cursor || reduced()) return
         rings.addLast(Triple(cursor.x,cursor.y,SystemClock.uptimeMillis()))
         while(rings.size>4) rings.removeFirst()
         invalidate()
     }
-    fun traceTo(x: Float,y: Float) {
+    private var gestureStart=0L
+    private var gestureLength=420L
+    private var gestureKind=""
+    private var gestureFromX=0f
+    private var gestureFromY=0f
+    private var gestureToX=0f
+    private var gestureToY=0f
+    fun hold(duration: Long) {
+        if(reduced() || !settings.visuals.cursor) return
+        gestureKind="hold";gestureStart=SystemClock.uptimeMillis();gestureLength=duration
+        gestureFromX=cursor.x;gestureFromY=cursor.y;invalidate()
+    }
+    fun scroll(down: Boolean) {
+        val distance=90*resources.displayMetrics.density*(if(down) -1 else 1)
+        traceTo(cursor.x,cursor.y+distance,420)
+    }
+    fun traceTo(x: Float,y: Float,duration: Long=420) {
         trace?.cancel()
         val sx=cursor.x;val sy=cursor.y
         if(reduced()) {cursor.x=x;cursor.y=y;invalidate();return}
+        gestureKind="swipe";gestureStart=SystemClock.uptimeMillis();gestureLength=duration
+        gestureFromX=sx;gestureFromY=sy;gestureToX=x;gestureToY=y
         trace=android.animation.ValueAnimator.ofFloat(0f,1f).apply {
-            duration=420;interpolator=android.view.animation.LinearInterpolator()
+            this.duration=duration;interpolator=android.view.animation.LinearInterpolator()
             addListener(object: android.animation.AnimatorListenerAdapter() {override fun onAnimationEnd(animation: android.animation.Animator) {moving=false;invalidate()}})
             addUpdateListener {if(run.active && !leaving) {val t=it.animatedValue as Float;cursor.x=sx+(x-sx)*t;cursor.y=sy+(y-sy)*t;moving=t<1;invalidate()}}
             start()
@@ -362,7 +385,7 @@ internal class AgentCanvas(context: Context): View(context) {
             val source=origin?.takeIf {it.x.isFinite() && it.y.isFinite() && it.radius.isFinite() && it.radius>0}
             // The cursor leaves its place — the chat sphere when the task came from the chat, otherwise from just below the screen.
             startX=source?.x?.coerceIn(0f,w) ?: (w/2f);startY=source?.y?.coerceIn(0f,h) ?: (h+28*d)
-            startRadius=source?.radius?.coerceIn(6*d,80*d) ?: (14*d)
+            startRadius=source?.radius?.coerceIn(6*d,minOf(w,h)*.48f) ?: (14*d)
             edgeOf(startX,startY).let {(x,y)->anchorX=x;anchorY=y}
             if(reduced()) {
                 if(source!=null) {cursor.x=w/2f;cursor.y=h/2f}
@@ -374,9 +397,9 @@ internal class AgentCanvas(context: Context): View(context) {
         val dt=(now-lastFrame).coerceIn(0,50)/1000f;lastFrame=now
         if(introRunning) {
             val t=((now-startedAt)/ARRIVE.toFloat()).coerceIn(0f,1f)
-            val (x,y)=Glide.at(startX,startY,w/2f,h/2f,t);cursor.x=x;cursor.y=y
+            val (x,y)=Glide.at(startX,startY,introTarget?.x ?: (w/2f),introTarget?.y ?: (h/2f),t);cursor.x=x;cursor.y=y
             radius=startRadius+(14*d-startRadius)*Glide.s(t)
-            presence=smooth(t)
+            presence=if(origin?.immersive==true) 1f else smooth(t)
             if(t>=1f) {introRunning=false;moving=false}
         }
         if(leaving) {
@@ -439,6 +462,25 @@ internal class AgentCanvas(context: Context): View(context) {
             satellites(canvas,false,x,y,radius,1f)
             if(typing>0f) caret(canvas,x,y,smooth(typing),1f) else sphere(canvas,x,y,radius,1f)
             satellites(canvas,true,x,y,radius,1f)
+            if(gestureKind.isNotEmpty() && !reduced()) {
+                val p=((now-gestureStart)/gestureLength.toFloat()).coerceAtLeast(0f)
+                if(p>1.6f) gestureKind="" else {
+                    pen.shader=null;pen.style=Paint.Style.STROKE;pen.strokeWidth=3*d;pen.strokeCap=Paint.Cap.ROUND
+                    pen.color=Color.argb((210*(if(p<=1f) 1f else (1.6f-p)/.6f)).toInt().coerceIn(0,255),162,211,255)
+                    val sx=gestureFromX-location[0];val sy=gestureFromY-location[1]
+                    if(gestureKind=="hold") {
+                        val r=radius+10*d
+                        canvas.drawArc(RectF(sx-r,sy-r,sx+r,sy+r),-90f,360*p.coerceAtMost(1f),false,pen)
+                    } else {
+                        val ex=sx+(gestureToX-gestureFromX)*p.coerceAtMost(1f);val ey=sy+(gestureToY-gestureFromY)*p.coerceAtMost(1f)
+                        canvas.drawLine(sx,sy,ex,ey,pen)
+                        val angle=kotlin.math.atan2(gestureToY-gestureFromY,gestureToX-gestureFromX)
+                        val size=11*d
+                        for(side in listOf(-1,1)) {val a=angle+side*.55f;canvas.drawLine(ex,ey,ex-kotlin.math.cos(a)*size,ey-kotlin.math.sin(a)*size,pen)}
+                    }
+                    pen.strokeCap=Paint.Cap.BUTT
+                }
+            }
             val iterator=rings.iterator()
             while(iterator.hasNext()) {
                 val ring=iterator.next();val p=((now-ring.third)/650f).coerceIn(0f,1f)
@@ -449,7 +491,7 @@ internal class AgentCanvas(context: Context): View(context) {
             }
             if(faded>=0) canvas.restoreToCount(faded)
         }
-        val settling=introRunning || leaving || (pause>0f && pause<1f) || typingActive || rings.isNotEmpty()
+        val settling=introRunning || leaving || (pause>0f && pause<1f) || typingActive || rings.isNotEmpty() || gestureKind.isNotEmpty()
         val animate=!reduced() && pause<1f && (settings.visuals.edgeGlow || settings.visuals.cursor)
         if(visibility==VISIBLE && (settling || animate)) postInvalidateOnAnimation()
     }
@@ -558,6 +600,6 @@ internal class AgentCanvas(context: Context): View(context) {
         pen.shader=null;pen.alpha=255
     }
     private fun blend(a: Int,b: Int,t: Float)=Color.argb(255,(Color.red(a)+(Color.red(b)-Color.red(a))*t).toInt(),(Color.green(a)+(Color.green(b)-Color.green(a))*t).toInt(),(Color.blue(a)+(Color.blue(b)-Color.blue(a))*t).toInt())
-    fun dispose() {trace?.cancel();trace=null;run=RunState();rings.clear();trail.clear();particles=null;introRunning=false;typing=0f;typingTarget=0f;leaving=false;onLeft=null}
+    fun dispose() {trace?.cancel();trace=null;gestureKind="";run=RunState();rings.clear();trail.clear();particles=null;introRunning=false;typing=0f;typingTarget=0f;leaving=false;onLeft=null}
     override fun onDetachedFromWindow() {dispose();super.onDetachedFromWindow()}
 }

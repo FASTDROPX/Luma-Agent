@@ -16,7 +16,7 @@ import org.robolectric.annotation.Config
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk=[35],application=Application::class)
+@Config(sdk=[35],application=Application::class,shadows=[HostAtomicFileShadow::class])
 class VaultAgentTest {
     @Test fun unlimitedAgentPassesFortyStepsWithBoundedRequestContext()=runBlocking {
         val vault=SettingsVault(context);vault.saveConnection(Provider.GEMINI,"fake","")
@@ -87,7 +87,7 @@ class VaultAgentTest {
     @Test fun deleteCommandWaitsForHumanAndRejectionDoesNotExecuteIt() = runBlocking {
         val vault=SettingsVault(context);vault.saveConnection(Provider.GEMINI,"fake-key","")
         vault.saveModels(Provider.GEMINI,vault.state.value.connection(),listOf(ModelInfo("gemini-test")));vault.selectModel(Provider.GEMINI,"gemini-test")
-        vault.update{it.copy(confirmActions=false)}
+        vault.update{it.copy(confirmActions=true)}
         val chats=ChatStore(context);val chat=chats.ensure("Удалить файл");chats.append(chat,"user","Удалить файл")
         var calls=0
         val api=ProviderClient { calls++;JSONObject("""{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"type\":\"tool\",\"tool\":\"delete_file\",\"args\":{\"path\":\"note.txt\"}}"}]}}]}""") }

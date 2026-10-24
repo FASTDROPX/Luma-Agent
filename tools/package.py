@@ -52,7 +52,7 @@ with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
     for path in sorted(ROOT.rglob('*')):
         if not path.is_file():continue
         parts=path.relative_to(ROOT).parts
-        if any(x in {'.gradle','.git','.kotlin','build','dist','__pycache__','.idea'} for x in parts):continue
+        if any(x in {'.gradle','.git','.cxx','.kotlin','build','dist','__pycache__','.idea'} for x in parts):continue
         if path.suffix in {'.log','.p12','.jks','.keystore','.apk'} or path.name=='local.properties':continue
         z.write(path,Path('LumaAgent')/path.relative_to(ROOT))
 print('APK:',apk)

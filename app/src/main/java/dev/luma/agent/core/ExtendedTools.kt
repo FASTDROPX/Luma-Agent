@@ -98,7 +98,7 @@ class ExtendedTools(private val context: Context, private val system: suspend (S
                 .apply { clipData = ClipData.newRawUri("capture", uri) }.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION))
             if (result.resultCode != Activity.RESULT_OK) throw ToolFailure(ToolStatus.DENIED, "Съёмка отменена.")
             if (!file.exists() || file.length() == 0L) throw ToolFailure(ToolStatus.UNKNOWN, "Камера не сохранила файл.")
-            return done().put("uri", uri.toString()).put("bytes", file.length()).put("note", "Файл сохранён в Luma; содержимое не отправлялось модели. Для просмотра используй open_capture с этим uri.")
+            return done().put("uri", uri.toString()).put("bytes", file.length()).put("artifact",GeneratedFile(file.name,uri.toString(),file.length(),System.currentTimeMillis(),if(video) "video/mp4" else "image/jpeg").json()).put("note", "Файл сохранён в Luma; содержимое не отправлялось модели. Для просмотра используй open_capture с этим uri.")
         } catch (e: Exception) { file.delete(); throw e }
     }
 
@@ -112,7 +112,7 @@ class ExtendedTools(private val context: Context, private val system: suspend (S
             recorder.setAudioSource(MediaRecorder.AudioSource.MIC); recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC); recorder.setOutputFile(file.absolutePath)
             recorder.prepare(); recorder.start(); delay(seconds * 1000L); recorder.stop()
-            done().put("uri", FileProvider.getUriForFile(context, "${context.packageName}.model-files", file).toString()).put("bytes", file.length()).put("seconds", seconds)
+            done().put("uri", FileProvider.getUriForFile(context, "${context.packageName}.model-files", file).toString()).put("bytes", file.length()).put("seconds", seconds).put("artifact",GeneratedFile(file.name,FileProvider.getUriForFile(context,"${context.packageName}.model-files",file).toString(),file.length(),System.currentTimeMillis(),"audio/mp4").json())
         } catch (e: Exception) { file.delete(); throw e }
         finally { runCatching { recorder.release() } }
     }
@@ -265,6 +265,7 @@ class ExtendedTools(private val context: Context, private val system: suspend (S
                 val atomic = android.util.AtomicFile(file); val output = atomic.startWrite()
                 try { output.write(bytes); atomic.finishWrite(output) } catch (e: Exception) { atomic.failWrite(output); throw e }
                 done().put("path", file.absolutePath).put("bytes", file.length())
+                    .put("artifact",GeneratedFile(file.name,Uri.fromFile(file).toString(),file.length(),System.currentTimeMillis(),"text/plain",Uri.fromFile(file.parentFile).toString()).json())
             }
             "storage_delete" -> { if (file == Environment.getExternalStorageDirectory().canonicalFile || !file.exists() || !file.delete()) throw UserError("Удаление не выполнено. Папка должна быть пустой."); done().put("deleted", true) }
             else -> {

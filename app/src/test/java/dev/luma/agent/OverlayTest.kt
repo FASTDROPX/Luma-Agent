@@ -91,6 +91,21 @@ class OverlayTest {
         fun run(ms: Int) {repeat(ms/16) {looper.idleFor(java.time.Duration.ofMillis(16));view.advanceVisualFrame(android.os.SystemClock.uptimeMillis())}}
         fun draw(): Bitmap {val b=Bitmap.createBitmap(411,891,Bitmap.Config.ARGB_8888);view.draw(Canvas(b));return b}
     }
+    @Test fun conversationSphereKeepsItsFullSizeAndShrinksWhileTravellingToTheAction() {
+        val app=ApplicationProvider.getApplicationContext<LumaApp>()
+        val view=AgentCanvas(app)
+        view.setOrigin(OrbHandoff(205f,300f,128f,emptyList(),immersive=true))
+        view.setIntroTarget(320f,680f)
+        view.configure(RunState(active=true),AppSettings());view.layout(0,0,411,891)
+        fun radius()=AgentCanvas::class.java.getDeclaredField("radius").apply {isAccessible=true}.getFloat(view)
+        val frames=Frames(view);view.advanceVisualFrame(android.os.SystemClock.uptimeMillis())
+        assertEquals(128f,radius(),0f);assertEquals(1f,view.presence,0f)
+        frames.run(560)
+        assertTrue(radius() in 14f..128f);assertTrue(view.cursor.y in 300f..680f)
+        frames.run(2000)
+        assertEquals(14f,radius(),.1f);assertEquals(320f,view.cursor.x,.1f);assertEquals(680f,view.cursor.y,.1f)
+        view.dispose()
+    }
     @Test fun entryLeavesTheChatSphereAlongTheSCurveWhileTheGlowSpreadsFromThere() {
         val app=ApplicationProvider.getApplicationContext<LumaApp>()
         val seeds=dev.luma.agent.ui.OrbPhysics(56).particles.map {CursorSeed(it.x,it.y,it.z,it.size,it.shade)}

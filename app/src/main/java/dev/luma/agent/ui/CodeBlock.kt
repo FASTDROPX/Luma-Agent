@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
@@ -54,8 +56,8 @@ import kotlinx.coroutines.withContext
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) scope.launch {
             note = withContext(Dispatchers.IO) {
-                runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(segment.code.toByteArray()) } ?: error("no stream"); "Файл сохранён" }
-                    .getOrDefault("Не удалось сохранить файл")
+                runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(segment.code.toByteArray()) } ?: error("no stream"); tr("Файл сохранён") }
+                    .getOrDefault(tr("Не удалось сохранить файл"))
             }
         }
     }
@@ -70,11 +72,11 @@ import kotlinx.coroutines.withContext
                     color = if (note != null) colors.onSurfaceVariant else colors.primary)
                 IconButton(onClick = { clipboard.setText(AnnotatedString(segment.code)); copied = true }, Modifier.size(36.dp).testTag("code-copy")) {
                     Crossfade(copied, animationSpec = tween(180), label = "code copied") { done ->
-                        Icon(if (done) Icons.Outlined.Check else Icons.Outlined.ContentCopy, if (done) "Скопировано" else "Копировать код", Modifier.size(17.dp), tint = colors.onSurfaceVariant)
+                        Icon(if (done) Icons.Outlined.Check else Icons.Outlined.ContentCopy, if (done) tr("Скопировано") else tr("Копировать код"), Modifier.size(17.dp), tint = colors.onSurfaceVariant)
                     }
                 }
                 IconButton(onClick = { save.launch("code.${language.extension}") }, Modifier.size(36.dp).testTag("code-save")) {
-                    Icon(Icons.Outlined.Download, "Скачать как .${language.extension}", Modifier.size(18.dp), tint = colors.onSurfaceVariant)
+                    Icon(Icons.Outlined.Download, tr("Скачать как .{0}" ,language.extension), Modifier.size(18.dp), tint = colors.onSurfaceVariant)
                 }
             }
             Text(code, Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 12.dp).testTag("code-text"),

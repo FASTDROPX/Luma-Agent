@@ -52,7 +52,7 @@ class OutputLimitsTest {
     }
 
     @Test fun manualLimitStaysAnExtraSettingWithinTheModelsMaximum() = runTest {
-        for (p in Provider.entries) {
+        for (p in Provider.entries.filter {it!=Provider.DEVICE}) {
             assertEquals("$p", 4096, (limitField(p, sent(p, ModelInfo("m", outputLimit = 65_536), manual = 4096)) as Number).toInt())
             assertEquals("$p cap", 2048, (limitField(p, sent(p, ModelInfo("m", outputLimit = 2048), manual = 4096)) as Number).toInt())
             assertEquals("$p unknown", 50_000, (limitField(p, sent(p, ModelInfo("m"), manual = 50_000)) as Number).toInt())

@@ -29,7 +29,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = Application::class)
+@Config(sdk = [35], application = Application::class,shadows=[HostAtomicFileShadow::class])
 class DirectActionsTest {
     private lateinit var context: Application
     @Before fun setup() { TestKeys.install(); context = ApplicationProvider.getApplicationContext(); File(context.noBackupFilesDir, "luma-vault.bin").delete() }
@@ -221,7 +221,7 @@ class DirectActionsTest {
         assertFalse(AgentApprovalPolicy.requiresApproval(tool("device_status"), confirmActions = true))
         assertFalse(AgentApprovalPolicy.requiresApproval(tool("open_notifications"), confirmActions = false))
         for (important in listOf(tool("clipboard", JSONObject().put("action", "get")), tool("delete_file", JSONObject().put("path", "a")), tool("move_file")))
-            assertTrue(important.name, AgentApprovalPolicy.requiresApproval(important, confirmActions = false))
+            assertFalse(important.name, AgentApprovalPolicy.requiresApproval(important, confirmActions = false))
 
         val audio = context.getSystemService(AudioManager::class.java); val volume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         val agent = AgentRun(context, configure = { it.copy(confirmActions = true) }) { _, _ -> Replies.openAiCall("volume", JSONObject().put("level", 0)) }
@@ -247,11 +247,12 @@ class DirectActionsTest {
     @Test fun anActionWithAnUnknownResultIsNotRepeatedWithoutTheUser() {
         val screen = FakeScreen(mapOf("swipe_screen" to ToolFailure(ToolStatus.UNKNOWN, "Android не подтвердил жест")))
         val swipe = JSONObject().put("direction", "up")
-        val agent = AgentRun(context, screen = screen) { _, _ -> Replies.openAiCall("swipe_screen", swipe) }
+        val agent = AgentRun(context, screen = screen, configure={it.copy(confirmActions=true)}) { _, _ -> Replies.openAiCall("swipe_screen", swipe) }
         try {
             var asked: Approval? = null
-            agent.run("Пролистай вверх") { asked = it; false }
-            assertEquals(1, screen.executed.size) // the repeat waited for the user even in full access
+            var approvals=0
+            agent.run("Пролистай вверх") { if(++approvals==1) true else {asked=it;false} }
+            assertEquals(1, screen.executed.size) // ask mode confirms the uncertain repeat before injecting it again
             assertTrue(asked!!.details.contains("неизвестен"))
         } finally { agent.close() }
     }

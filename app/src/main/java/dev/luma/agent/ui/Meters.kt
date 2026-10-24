@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import android.os.SystemClock
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -43,7 +45,7 @@ import kotlinx.coroutines.delay
         val transition = rememberInfiniteTransition(label = "meter pulse")
         transition.animateFloat(.45f, 1f, infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "meter alpha").value
     } else 1f
-    val label = if (stats == null) "т/с —" else "↑ ${formatRate(stats.inputPerSecond)} · ↓ ${formatRate(stats.outputPerSecond)} т/с"
+    val label = if (stats == null) tr("т/с —") else tr("↑ {0} · ↓ {1} т/с" ,formatRate(stats.inputPerSecond),formatRate(stats.outputPerSecond))
     AnimatedContent(label, modifier.testTag("token-meter").clip(RoundedCornerShape(8.dp)).clickable(enabled = stats != null || usage != null) { details = true }
         .graphicsLayer { alpha = pulse }.padding(horizontal = 6.dp, vertical = 1.dp),
         transitionSpec = { (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 2 }) togetherWith (fadeOut(tween(160)) + slideOutVertically(tween(160)) { -it / 2 }) },
@@ -51,27 +53,27 @@ import kotlinx.coroutines.delay
         Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
     }
     if (details && (stats != null || usage != null)) AlertDialog(onDismissRequest = { details = false }, icon = { Icon(Icons.Outlined.Speed, null) },
-        title = { Text(if (stats != null) "Скорость последнего ответа" else "Расход токенов") }, text = {
+        title = { Text(if (stats != null) tr("Скорость последнего ответа") else tr("Расход токенов")) }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (stats != null) TokenDetails(stats)
                 usage?.let { u ->
                     if (stats != null) HorizontalDivider()
-                    Text("Расход токенов", style = MaterialTheme.typography.titleSmall)
-                    MeterRow("Этот чат", tokens(u.chatInput + u.chatOutput), "↑ ${tokens(u.chatInput)} · ↓ ${tokens(u.chatOutput)}")
-                    MeterRow("Сегодня", tokens(u.dayInput + u.dayOutput), "↑ ${tokens(u.dayInput)} · ↓ ${tokens(u.dayOutput)}")
+                    Text(tr("Расход токенов"), style = MaterialTheme.typography.titleSmall)
+                    MeterRow(tr("Этот чат"), tokens(u.chatInput + u.chatOutput), "↑ ${tokens(u.chatInput)} · ↓ ${tokens(u.chatOutput)}")
+                    MeterRow(tr("Сегодня"), tokens(u.dayInput + u.dayOutput), "↑ ${tokens(u.dayInput)} · ↓ ${tokens(u.dayOutput)}")
                 }
             }
-        }, confirmButton = { TextButton(onClick = { details = false }) { Text("Понятно") } })
+        }, confirmButton = { TextButton(onClick = { details = false }) { Text(tr("Понятно")) } })
 }
 private fun tokens(n: Long) = "%,d".format(java.util.Locale.ROOT, n).replace(',', ' ')
 @Composable private fun TokenDetails(stats: TokenStats) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                MeterRow("Вход", "${stats.inputTokens} ток.", if (stats.firstTokenMs > 0) "${formatRate(stats.inputPerSecond)} т/с за ${seconds(stats.firstTokenMs)}" else "без потока — не измерить")
-                MeterRow("Выход", "${if (stats.estimated) "≈" else ""}${stats.outputTokens} ток.", "${formatRate(stats.outputPerSecond)} т/с")
-                if (stats.thinkingMs > 0) MeterRow("Рассуждения", seconds(stats.thinkingMs), "")
-                MeterRow("Всего", seconds(stats.totalMs), "")
-                Text("Вход считается до первого токена ответа и включает задержку сети. " +
-                    if (stats.estimated) "Сервер не сообщил число токенов — выход оценён по длине текста." else "",
+                MeterRow(tr("Вход"), tr("{0} ток." ,stats.inputTokens), if (stats.firstTokenMs > 0) tr("{0} т/с за {1}" ,formatRate(stats.inputPerSecond),seconds(stats.firstTokenMs)) else tr("без потока — не измерить"))
+                MeterRow(tr("Выход"), tr("{0}{1} ток." ,if (stats.estimated) "≈" else "",stats.outputTokens), tr("{0} т/с" ,formatRate(stats.outputPerSecond)))
+                if (stats.thinkingMs > 0) MeterRow(tr("Рассуждения"), seconds(stats.thinkingMs), "")
+                MeterRow(tr("Всего"), seconds(stats.totalMs), "")
+                Text(tr("Вход считается до первого токена ответа и включает задержку сети. ") +
+                    if (stats.estimated) tr("Сервер не сообщил число токенов — выход оценён по длине текста.") else "",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 }
@@ -84,7 +86,7 @@ private fun tokens(n: Long) = "%,d".format(java.util.Locale.ROOT, n).replace(','
         }
     }
 }
-private fun seconds(ms: Long) = if (ms < 60_000) "%.1f с".format(java.util.Locale.ROOT, ms / 1000.0).replace('.', ',') else formatElapsed(ms)
+private fun seconds(ms: Long) = if (ms < 60_000) tr("%.1f с").format(java.util.Locale.ROOT, ms / 1000.0).replace('.', ',') else formatElapsed(ms)
 
 /** DeepSeek-style collapsible reasoning: "Рассуждения · 12,4 с ›". */
 @Composable fun ThinkingBlock(reasoning: String, stats: TokenStats?, modifier: Modifier = Modifier) {
@@ -96,9 +98,9 @@ private fun seconds(ms: Long) = if (ms < 60_000) "%.1f с".format(java.util.Loca
         Row(Modifier.clip(RoundedCornerShape(10.dp)).clickable { open = !open }.padding(vertical = 4.dp, horizontal = 2.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Outlined.Psychology, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(if (stats != null && stats.thinkingMs > 0) "Рассуждения · ${seconds(stats.thinkingMs)}" else "Рассуждения",
+            Text(if (stats != null && stats.thinkingMs > 0) tr("Рассуждения · {0}" ,seconds(stats.thinkingMs)) else tr("Рассуждения"),
                 style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Icon(Icons.Outlined.ChevronRight, if (open) "Скрыть рассуждения" else "Показать рассуждения", Modifier.size(18.dp).rotate(turn), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(Icons.Outlined.ChevronRight, if (open) tr("Скрыть рассуждения") else tr("Показать рассуждения"), Modifier.size(18.dp).rotate(turn), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         AnimatedVisibility(open, enter = if (reduced) EnterTransition.None else expandVertically(spring(stiffness = 600f)) + fadeIn(tween(220)),
             exit = if (reduced) ExitTransition.None else shrinkVertically(tween(200)) + fadeOut(tween(150))) {

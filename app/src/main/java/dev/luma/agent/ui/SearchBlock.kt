@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.clickable
@@ -22,10 +24,10 @@ import dev.luma.agent.core.WebSearch
 
 /** The line under the header: "Найдено 12 страниц · прочитано 5", or what is known of it. */
 internal fun searchSummary(search: WebSearch): String = when {
-    search.found == 0 && search.queries.isNotEmpty() -> "Поиск в интернете · ${search.queries.size} ${if (search.queries.size == 1) "запрос" else "запроса"}, страниц нет"
-    search.found == 0 -> "Поиск в интернете"
-    search.read == 0 || search.read == search.found -> "Поиск в интернете · найдено ${WebSearch.pages(search.found)}"
-    else -> "Поиск в интернете · найдено ${WebSearch.pages(search.found)} · прочитано ${search.read}"
+    search.found == 0 && search.queries.isNotEmpty() -> tr("Поиск в интернете · {0} {1}, страниц нет" ,search.queries.size,if (search.queries.size == 1) "запрос" else "запроса")
+    search.found == 0 -> tr("Поиск в интернете")
+    search.read == 0 || search.read == search.found -> tr("Поиск в интернете · найдено {0}" ,WebSearch.pages(search.found))
+    else -> tr("Поиск в интернете · найдено {0} · прочитано {1}" ,WebSearch.pages(search.found),search.read)
 }
 
 /**
@@ -43,13 +45,13 @@ internal fun searchSummary(search: WebSearch): String = when {
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Outlined.TravelExplore, null, Modifier.size(16.dp), tint = muted)
             Text(searchSummary(search), Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelLarge, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Icon(Icons.Outlined.ChevronRight, if (open) "Скрыть подробности поиска" else "Показать подробности поиска", Modifier.size(18.dp).rotate(turn), tint = muted)
+            Icon(Icons.Outlined.ChevronRight, if (open) tr("Скрыть подробности поиска") else tr("Показать подробности поиска"), Modifier.size(18.dp).rotate(turn), tint = muted)
         }
         AnimatedVisibility(open, enter = if (reduced) EnterTransition.None else expandVertically(spring(stiffness = 600f)) + fadeIn(tween(220)),
             exit = if (reduced) ExitTransition.None else shrinkVertically(tween(200)) + fadeOut(tween(150))) {
             Column(Modifier.padding(start = 8.dp, top = 2.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (search.queries.isNotEmpty()) {
-                    Text("Запросы", style = MaterialTheme.typography.labelMedium, color = muted)
+                    Text(tr("Запросы"), style = MaterialTheme.typography.labelMedium, color = muted)
                     search.queries.forEach { query ->
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Outlined.Search, null, Modifier.size(14.dp), tint = muted)
@@ -58,7 +60,7 @@ internal fun searchSummary(search: WebSearch): String = when {
                     }
                 }
                 if (search.sources.isNotEmpty()) {
-                    Text(if (search.read in 1 until search.found) "Страницы · прочитанные отмечены" else "Страницы", Modifier.padding(top = 4.dp),
+                    Text(if (search.read in 1 until search.found) tr("Страницы · прочитанные отмечены") else tr("Страницы"), Modifier.padding(top = 4.dp),
                         style = MaterialTheme.typography.labelMedium, color = muted)
                     search.sources.forEachIndexed { index, source ->
                         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { runCatching { uri.openUri(source.url) } }
@@ -71,7 +73,7 @@ internal fun searchSummary(search: WebSearch): String = when {
                                 val host = WebSearch.host(source.url)
                                 if (!host.startsWith("vertexaisearch.")) Text(host, style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            if (source.read && search.read < search.found) Icon(Icons.Outlined.DoneAll, "Прочитано", Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
+                            if (source.read && search.read < search.found) Icon(Icons.Outlined.DoneAll, tr("Прочитано"), Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
