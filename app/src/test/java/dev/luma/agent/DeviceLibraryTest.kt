@@ -45,7 +45,7 @@ class DeviceLibraryTest {
         val id=downloads.enqueue(HubFile("author/model","a".repeat(40),"small.gguf",8),true)
         val request=shadowOf(shadowOf(manager).getRequest(id));val file=File(request.destination.path!!)
         file.parentFile?.mkdirs();file.writeText("GGUFtest");request.status=DownloadManager.STATUS_SUCCESSFUL
-        downloads.refresh()
+        assertEquals(file.canonicalPath,library.file("hf:$id").canonicalPath)
         val item=library.state.value.single()
         assertEquals("hf:$id",item.id);assertFalse(item.imported)
         assertEquals(file.canonicalPath,library.file(item.id).canonicalPath)

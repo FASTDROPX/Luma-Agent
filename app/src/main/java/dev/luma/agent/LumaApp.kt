@@ -116,7 +116,7 @@ class AppGraph(val context: Context) {
         val settings = vault.state.value; val connection = settings.connection()
         if (connection.model.isBlank()) { uiMessage.value = "Сначала подключите провайдера и выберите модель."; return false }
         if(asAgent) pendingHandoff=orbAnchor?.let {OrbHandoff(it.x,it.y,it.radius,it.seeds())}
-        chatBusy.value = true; chatStartedAt.value = android.os.SystemClock.elapsedRealtime()
+        chatBusy.value = true; chatStatus.value=null;chatStartedAt.value = android.os.SystemClock.elapsedRealtime()
         val revision = ++chatRevision
         chatJob = scope.launch {
             var chatId: Long? = null
@@ -192,7 +192,7 @@ class AppGraph(val context: Context) {
     fun regenerate(chat: Long, replace: Long?) {
         if (chatBusy.value || agent.state.value.active) return
         if (vault.state.value.connection().model.isBlank()) { uiMessage.value = "Сначала подключите провайдера и выберите модель."; return }
-        chatBusy.value = true; chatStartedAt.value = android.os.SystemClock.elapsedRealtime()
+        chatBusy.value = true; chatStatus.value=null;chatStartedAt.value = android.os.SystemClock.elapsedRealtime()
         val revision = ++chatRevision
         chatJob = scope.launch {
             try {
@@ -201,7 +201,7 @@ class AppGraph(val context: Context) {
                 answer(chat)
             } catch (e: CancellationException) { }
             catch (e: Exception) { fail(chat, e) }
-            finally { if (revision == chatRevision) { chatBusy.value = false; chatStartedAt.value = 0L } }
+            finally { if (revision == chatRevision) { chatBusy.value = false; chatStartedAt.value = 0L;chatStatus.value=null } }
         }
     }
     fun deleteMessage(id: Long) { scope.launch { runCatching { chats.deleteMessage(id) }.onFailure { uiMessage.value = safeError(it) } } }

@@ -34,7 +34,12 @@ class DeviceModels(private val context: Context,private val downloads: HubDownlo
     }
     private fun localFile(model: DeviceModel)=File(folder,model.id.removePrefix("file:")+".gguf")
     suspend fun file(id: String): File {
-        if(id.startsWith("hf:")) return downloads.fileForShare(id.removePrefix("hf:").toLongOrNull() ?: throw UserError("Модель не найдена."))
+        if(id.startsWith("hf:")) {
+            // Persisted DownloadManager entries start as QUEUED after process recreation.
+            // A saved model must work from chat before the user opens the downloads screen.
+            downloads.refresh()
+            return downloads.fileForShare(id.removePrefix("hf:").toLongOrNull() ?: throw UserError("Модель не найдена."))
+        }
         return mutex.withLock {
             val item=imported.firstOrNull {it.id==id} ?: throw UserError("Модель удалена. Выберите другую модель на телефоне.")
             localFile(item).also {if(!validGguf(it,item.bytes)) throw UserError("Файл модели повреждён или удалён.")}
