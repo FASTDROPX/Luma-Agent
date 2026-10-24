@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,6 +55,9 @@ import kotlin.math.*
     var controls by remember { mutableStateOf(false) }
     var entered by remember { mutableStateOf(false) }
     var closing by remember { mutableStateOf(false) }
+    var rootCoordinates by remember {mutableStateOf<LayoutCoordinates?>(null)}
+    var headerBottom by remember {mutableFloatStateOf(0f)}
+    var statusTop by remember {mutableFloatStateOf(0f)}
     val reduced=LocalReducedMotion.current
     LaunchedEffect(Unit) {entered=true}
     LaunchedEffect(closing) {if(closing) {kotlinx.coroutines.delay(if(reduced) 0 else 280);graph.voice.stop()}}
@@ -69,13 +74,15 @@ import kotlin.math.*
             val on=MaterialTheme.colorScheme.onSurface
             val speaking=state.phase=="Озвучиваю"
             val thinking=state.phase in listOf("Думаю","Расшифровываю","Подготовка")
-            val label=when {muted->tr("Микрофон выключен"); speaking->tr("Luma отвечает");thinking->if(agent) tr("Luma выполняет задачу") else tr("Luma думает");else->tr("Я слушаю")}
-            Box(Modifier.fillMaxSize().background(background).testTag("conversation-screen")) {
+            val label=when {speaking->tr("Luma отвечает");thinking->if(run.active) tr("Luma выполняет задачу") else tr("Luma думает");muted->tr("Микрофон выключен");else->tr("Я слушаю")}
+            Box(Modifier.fillMaxSize().background(background).onGloballyPositioned {rootCoordinates=it}.testTag("conversation-screen")) {
                 ConversationEdgeLight(Modifier.matchParentSize(),outputLevel,speaking)
                 // The same identity as the app's orb, expanded into a responsive particle field.
-                VoiceConstellation(Modifier.fillMaxWidth().fillMaxHeight(.78f).align(Alignment.Center),state.level,outputLevel,speaking,thinking,muted)
+                VoiceConstellation(Modifier.fillMaxSize(),state.level,outputLevel,speaking,thinking,muted,headerBottom,statusTop)
                 Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal=24.dp)) {
-                    Row(Modifier.fillMaxWidth().height(60.dp),verticalAlignment=Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().height(60.dp).onGloballyPositioned {coordinates ->
+                        rootCoordinates?.takeIf {it.isAttached}?.let {headerBottom=it.localPositionOf(coordinates,Offset(0f,coordinates.size.height.toFloat())).y}
+                    },verticalAlignment=Alignment.CenterVertically) {
                         IconButton(onClick={graph.voice.screen.value=false;openChat()},modifier=Modifier.testTag("conversation-minimize")) {Icon(Icons.Outlined.KeyboardArrowDown,tr("Свернуть разговор"))}
                         Column(Modifier.weight(1f),horizontalAlignment=Alignment.CenterHorizontally) {
                             Text("Luma",style=MaterialTheme.typography.titleLarge)
@@ -85,7 +92,9 @@ import kotlin.math.*
                         IconButton(onClick={controls=true},modifier=Modifier.testTag("conversation-settings")) {Icon(Icons.Outlined.Tune,tr("Настройки разговора"))}
                     }
                     Spacer(Modifier.weight(1f))
-                    AnimatedContent(label,transitionSpec={fadeIn(tween(300)) togetherWith fadeOut(tween(180))},label="voice phase") {
+                    AnimatedContent(label,modifier=Modifier.onGloballyPositioned {coordinates ->
+                        rootCoordinates?.takeIf {it.isAttached}?.let {statusTop=it.localPositionOf(coordinates,Offset.Zero).y}
+                    },transitionSpec={fadeIn(tween(300)) togetherWith fadeOut(tween(180))},label="voice phase") {
                         Text(it,Modifier.fillMaxWidth(),style=MaterialTheme.typography.headlineSmall,textAlign=TextAlign.Center)
                     }
                     Spacer(Modifier.height(14.dp))
@@ -159,12 +168,12 @@ import kotlin.math.*
 }
 
 /** Draw-time animation: no recomposition per particle, no bitmap filters or per-frame allocations of particle state. */
-@Composable internal fun VoiceConstellation(modifier: Modifier,input: Float,output: Float,speaking: Boolean,thinking: Boolean,muted: Boolean) {
+@Composable internal fun VoiceConstellation(modifier: Modifier,input: Float,output: Float,speaking: Boolean,thinking: Boolean,muted: Boolean,contentTop: Float=0f,contentBottom: Float=0f) {
     val reduced=LocalReducedMotion.current
     val lifecycle=LocalLifecycleOwner.current
     val primary=MaterialTheme.colorScheme.primary
     var time by remember {mutableFloatStateOf(0f)}
-    val energy by animateFloatAsState(if(muted || reduced) 0f else if(speaking) output.coerceAtLeast(.18f) else input,
+    val energy by animateFloatAsState(if(reduced) 0f else if(speaking) output.coerceAtLeast(.18f) else if(muted) 0f else input,
         animationSpec=if(reduced) snap() else tween(180, easing=LinearOutSlowInEasing),label="voice energy")
     val speech by animateFloatAsState(if(speaking) 1f else 0f,tween(if(reduced) 0 else 700),label="speech orbit")
     val thought by animateFloatAsState(if(thinking) 1f else 0f,tween(if(reduced) 0 else 700),label="thought orbit")
@@ -175,8 +184,12 @@ import kotlin.math.*
         }
     }
     Canvas(modifier) {
-        val t=time;val c=center+Offset(0f,-size.height*.07f)
-        val radius=size.minDimension*.29f*(1f+energy*.065f+sin(t*1.3f)*.012f)
+        val t=time
+        val top=if(contentBottom>contentTop) contentTop else size.height*.13f
+        val bottom=if(contentBottom>contentTop) contentBottom else size.height*.62f
+        val available=bottom-top
+        val c=Offset(center.x,top+available*.65f)
+        val radius=min(size.minDimension*.29f,available*.30f)*(1f+energy*.065f+sin(t*1.3f)*.012f)
         val ice=Color(0xff9ee8ff);val violet=lerp(Color(0xffb4b8ff),primary,.2f)
         drawCircle(Brush.radialGradient(listOf(ice.copy(alpha=.10f+energy*.05f),violet.copy(alpha=.035f),Color.Transparent),c,radius*2.3f),radius*2.3f,c)
         fun particleField(front: Boolean) {
@@ -193,7 +206,7 @@ import kotlin.math.*
                 val x=cos(a)*radius*(orbit+flow)
                 val y=sin(a)*radius*(.48f+sin(seed*.37f)*.28f)+sin(seed*.71f+t*.2f)*radius*.34f
                 val p=c+Offset(x,y)
-                val alpha=(.16f+(z+1f)*.19f+energy*.25f)*sin(cycle*PI.toFloat()).coerceAtLeast(.02f)*(if(muted) .35f else 1f)
+                val alpha=(.16f+(z+1f)*.19f+energy*.25f)*sin(cycle*PI.toFloat()).coerceAtLeast(.02f)*(if(muted && !speaking) .35f else 1f)
                 val color=lerp(ice,violet,(sin(seed)+1f)/2).copy(alpha=alpha)
                 val dot=(.7f+(i%5)*.28f).dp.toPx()*(.75f+(z+1f)*.25f)
                 if(i%9==0) drawCircle(color.copy(alpha=alpha*.10f),dot*4f,p)
