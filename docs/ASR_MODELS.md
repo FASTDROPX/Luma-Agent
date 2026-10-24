@@ -1,4 +1,4 @@
-# Модели распознавания test4
+# Модели распознавания 1.0.0
 
 - Русский: [GigaAM v2 CTC int8](https://huggingface.co/csukuangfj/sherpa-onnx-nemo-ctc-giga-am-v2-russian-2025-04-19/tree/f5555086f28ef11d600e30d76b61d75fd9685196), исходная [GigaAM](https://github.com/salute-developers/GigaAM), MIT, GigaChat Team. Модель 236457977 байт, SHA-256 `d0ce4aef25f58d495781ee8f05320d9e51b821f47804e07aa6549b53a72f67e8`.
 - Английский, немецкий и французский: [Whisper Small int8](https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/tree/8f3c18b358db4d1f2fc1eae49d75cd20989e4309), исходная [OpenAI Whisper](https://github.com/openai/whisper), MIT. Энкодер 112442483 байт, SHA `4cbe7b22fa9026b843b60a68640c747de05bafb1a11b57edc0e66c232d9f33a9`; декодер 262226114 байт, SHA `acad50b5c782696e91b55914cc5ab4f756f1532f76e22aa6fc615f39fb69a8ee`.
