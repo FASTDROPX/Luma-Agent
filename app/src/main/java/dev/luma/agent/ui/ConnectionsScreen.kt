@@ -40,10 +40,12 @@ import dev.luma.agent.core.*
     if (onboarding) { ApiConnectionsScreen(graph, true); return }
     var modelTab by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) {
-            SegmentedButton(modelTab==0, { modelTab=0 }, SegmentedButtonDefaults.itemShape(0,3),icon={}) { Text("API") }
-            SegmentedButton(modelTab==1, { modelTab=1 }, SegmentedButtonDefaults.itemShape(1,3),icon={}) { Text("На телефоне",maxLines=1) }
-            SegmentedButton(modelTab==2, { modelTab=2 }, SegmentedButtonDefaults.itemShape(2,3),icon={}) { Text("Каталог") }
+        PrimaryTabRow(selectedTabIndex = modelTab, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+            listOf("API", "На телефоне", "Каталог").forEachIndexed { index, title ->
+                Tab(selected = modelTab == index, onClick = { modelTab = index }, text = {
+                    Text(title, maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                })
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) { when(modelTab) {1->DeviceModelsScreen(graph);2->HuggingFaceScreen(graph);else->ApiConnectionsScreen(graph)} }
     }
