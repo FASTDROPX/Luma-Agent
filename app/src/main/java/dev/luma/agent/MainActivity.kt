@@ -121,7 +121,7 @@ private data class Destination(val title: String, val icon: ImageVector)
                 }
                 if (history) HistorySheet(graph, { history = false }) { id -> scope.launch { graph.chats.select(id) }; tab = 0; history = false }
                 if (models) ModelSheet(graph, { models = false }) { tab = 1 }
-                ConversationHost(graph)
+                ConversationHost(graph) {tab=0;history=false;if(run.active) scope.launch {graph.chats.select(run.chatId)}}
             }
         }
     } }

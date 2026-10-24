@@ -41,7 +41,7 @@ import kotlinx.coroutines.isActive
 import kotlin.math.*
 
 /** A separate, immersive voice surface. It never changes the phone-control overlays. */
-@Composable fun ConversationHost(graph: AppGraph) {
+@Composable fun ConversationHost(graph: AppGraph,openChat: ()->Unit={}) {
     val visible by graph.voice.screen.collectAsStateWithLifecycle()
     if (!visible) return
     val state by graph.voice.state.collectAsStateWithLifecycle()
@@ -76,7 +76,7 @@ import kotlin.math.*
                 VoiceConstellation(Modifier.fillMaxWidth().fillMaxHeight(.78f).align(Alignment.Center),state.level,outputLevel,speaking,thinking,muted)
                 Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal=24.dp)) {
                     Row(Modifier.fillMaxWidth().height(60.dp),verticalAlignment=Alignment.CenterVertically) {
-                        IconButton(onClick={graph.voice.screen.value=false},modifier=Modifier.testTag("conversation-minimize")) {Icon(Icons.Outlined.KeyboardArrowDown,tr("Свернуть разговор"))}
+                        IconButton(onClick={graph.voice.screen.value=false;openChat()},modifier=Modifier.testTag("conversation-minimize")) {Icon(Icons.Outlined.KeyboardArrowDown,tr("Свернуть разговор"))}
                         Column(Modifier.weight(1f),horizontalAlignment=Alignment.CenterHorizontally) {
                             Text("Luma",style=MaterialTheme.typography.titleLarge)
                             Text(settings.connection().models.firstOrNull {it.id==settings.connection().model}?.name ?: settings.connection().model,
@@ -98,7 +98,7 @@ import kotlin.math.*
                         FilterChip(agent,{graph.setAgentMode(true)},label={Text(tr("Агент"))},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(16.dp))})
                     }
                     if(run.active && (run.approval!=null || run.permission!=null || run.systemAction!=null)) {
-                        FilledTonalButton(onClick={graph.voice.screen.value=false},modifier=Modifier.align(Alignment.CenterHorizontally)) {Text(tr("Нужно подтверждение"))}
+                        FilledTonalButton(onClick={graph.voice.screen.value=false;openChat()},modifier=Modifier.align(Alignment.CenterHorizontally)) {Text(tr("Нужно подтверждение"))}
                     }
                     Spacer(Modifier.height(24.dp))
                     Row(Modifier.fillMaxWidth().padding(horizontal=12.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
