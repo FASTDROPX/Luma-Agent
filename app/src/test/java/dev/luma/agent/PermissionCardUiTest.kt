@@ -19,6 +19,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [35], application = android.app.Application::class, qualifiers = "w411dp-h891dp-mdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PermissionCardUiTest {
+    @org.junit.Before fun locale() {I18n.choose("ru")}
     @get:Rule val compose = createAndroidComposeRule<androidx.activity.ComponentActivity>()
     @Test fun alternativeIsVisibleAndInvokesItsOwnAction() {
         var fallback = false; var grant = false

@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -52,13 +54,13 @@ object SyntaxHighlighter {
         add("YAML", "yaml", CodeLanguage.Family.YAML, "yaml", "yml")
         add("TOML", "toml", CodeLanguage.Family.YAML, "toml", "ini", "properties", "conf")
         add("Markdown", "md", CodeLanguage.Family.PLAIN, "markdown", "md")
-        add("Текст", "txt", CodeLanguage.Family.PLAIN, "text", "txt", "plaintext", "")
+        add(tr("Текст"), "txt", CodeLanguage.Family.PLAIN, "text", "txt", "plaintext", "")
     }
 
     /** Known languages by their fence name; anything else keeps its own name and saves as .txt. */
     fun language(fence: String): CodeLanguage {
         val name = fence.trim().lowercase()
-        return languages[name] ?: CodeLanguage(fence.trim().take(20).ifBlank { "Текст" }, name.filter { it.isLetterOrDigit() }.take(8).ifBlank { "txt" }, CodeLanguage.Family.PLAIN)
+        return languages[name] ?: CodeLanguage(fence.trim().take(20).ifBlank { tr("Текст") }, name.filter { it.isLetterOrDigit() }.take(8).ifBlank { "txt" }, CodeLanguage.Family.PLAIN)
     }
 
     private val cKeywords = ("abstract actor as assert async await break case catch class companion const constructor continue crossinline data def default defer delegate " +

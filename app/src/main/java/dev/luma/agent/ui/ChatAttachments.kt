@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -35,9 +37,9 @@ import kotlinx.coroutines.withContext
                     else Icon(if(file.mime.startsWith("audio/")) Icons.Outlined.AudioFile else Icons.Outlined.InsertDriveFile,null,Modifier.size(26.dp))
                     Column(Modifier.weight(1f,fill=false).widthIn(max=110.dp)) {
                         Text(file.name,maxLines=1,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.labelMedium)
-                        Text(if(file.size<1000) "${file.size} Б" else if(file.size<1_000_000) "${file.size/1000} КБ" else "%.1f МБ".format(file.size/1_000_000f),style=MaterialTheme.typography.labelSmall)
+                        Text(if(file.size<1000) tr("{0} Б" ,file.size) else if(file.size<1_000_000) tr("{0} КБ" ,file.size/1000) else tr("%.1f МБ").format(file.size/1_000_000f),style=MaterialTheme.typography.labelSmall)
                     }
-                    if(remove!=null) IconButton(onClick={remove(file)},modifier=Modifier.size(32.dp)) {Icon(Icons.Outlined.Close,"Убрать ${file.name}",Modifier.size(16.dp))}
+                    if(remove!=null) IconButton(onClick={remove(file)},modifier=Modifier.size(32.dp)) {Icon(Icons.Outlined.Close,tr("Убрать {0}" ,file.name),Modifier.size(16.dp))}
                 }
             }
         }

@@ -1,6 +1,8 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.snap
@@ -14,7 +16,7 @@ import androidx.compose.ui.unit.dp
 
 /** Material 3 Expressive's morphing shape, with a static alternative for reduced motion. */
 @Composable fun LumaLoading(modifier: Modifier=Modifier.size(24.dp)) {
-    if(LocalReducedMotion.current) Icon(Icons.Outlined.HourglassTop,"Загрузка",modifier,tint=MaterialTheme.colorScheme.primary)
+    if(LocalReducedMotion.current) Icon(Icons.Outlined.HourglassTop,tr("Загрузка"),modifier,tint=MaterialTheme.colorScheme.primary)
     else LoadingIndicator(modifier=modifier)
 }
 

@@ -26,9 +26,13 @@ data class DictationResult(val chat: Long?,val text: String)
 
 /** One owner for microphone, recognizer, speech playback and conversation cancellation. */
 class VoiceController(private val graph: AppGraph) {
-    val model=VoiceModel(graph.context,graph.scope)
-    val output=SpeechOutput(graph.context)
+    val model=VoiceModel(graph.context,graph.scope,graph.vault.state.value.voice.language)
+    val packs=SpeechPacks(graph.context,graph.scope)
+    val output=SpeechOutput(graph.context).also {it.packs=packs}
     val state=MutableStateFlow(VoiceState())
+    val screen=MutableStateFlow(false)
+    val muted=MutableStateFlow(false)
+    fun toggleMute() {muted.value=!muted.value}
     val dictation=MutableStateFlow<DictationResult?>(null)
     private val cloud=CloudSpeech()
     private var job: Job?=null
@@ -38,15 +42,18 @@ class VoiceController(private val graph: AppGraph) {
     /** Called from a visible Activity (Android 14's microphone foreground-service rule). */
     fun start(mode: String) {
         if(state.value.active || job?.isCompleted==false) {graph.uiMessage.value="Дождитесь остановки текущего голосового режима.";return}
-        if(!model.ready()) {graph.uiMessage.value="Сначала скачайте русскую голосовую модель в настройках → Голос.";return}
+        if(!model.ready()) {graph.uiMessage.value="Сначала скачайте модель выбранного языка в настройках → Голос.";return}
+        if(graph.vault.state.value.voice.synthesis=="piper" && !packs.ready(SpeechPacks.selected(graph.vault.state.value.voice)) && mode!="dictation") {graph.uiMessage.value="Сначала скачайте выбранный голос в настройках → Голос.";return}
         if(graph.context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED) {graph.uiMessage.value="Разрешите микрофон для голосового режима.";return}
         if(mode!="dictation" && graph.vault.state.value.connection().model.isBlank()) {graph.uiMessage.value="Сначала подключите модель ИИ.";return}
+        muted.value=false
+        if(mode=="conversation") screen.value=true
         launchService(mode)
     }
     private fun launchService(mode: String) {
         state.value=VoiceState(mode,"Подготовка",speakingId=if(mode=="read") lastReplyId else null)
         try {graph.context.startForegroundService(Intent(graph.context,VoiceService::class.java).putExtra("mode",mode))}
-        catch(e: Exception) {state.value=VoiceState();graph.uiMessage.value="Не удалось включить голос. Откройте Luma и повторите запуск."}
+        catch(e: Exception) {screen.value=false;state.value=VoiceState();graph.uiMessage.value="Не удалось включить голос. Откройте Luma и повторите запуск."}
     }
     fun read(id: Long,text: String) {
         if(state.value.mode=="read" && state.value.speakingId==id) {stop();return}
@@ -54,12 +61,12 @@ class VoiceController(private val graph: AppGraph) {
         lastReplyId=id;lastReply=text;launchService("read")
     }
     fun finishDictation() {finishInput=true}
-    fun stop() {job?.cancel();output.stop();state.value=VoiceState();graph.context.stopService(Intent(graph.context,VoiceService::class.java))}
-    fun serviceDestroyed() {job?.cancel();output.stop();state.value=VoiceState()}
+    fun stop() {screen.value=false;muted.value=false;job?.cancel();output.stop();state.value=VoiceState();graph.context.stopService(Intent(graph.context,VoiceService::class.java))}
+    fun serviceDestroyed() {screen.value=false;job?.cancel();output.stop();state.value=VoiceState()}
     fun begin(mode: String,onFinished: ()->Unit) {
         if(job?.isActive==true) return
         finishInput=false
-        val chat=graph.chats.selected.value;val agent=graph.chats.agentMode.value
+        val chat=graph.chats.selected.value
         state.value=VoiceState(mode,"Подготовка",speakingId=if(mode=="read") lastReplyId else null)
         job=graph.scope.launch {
             try {
@@ -73,6 +80,7 @@ class VoiceController(private val graph: AppGraph) {
                         var waiting=mode=="wake"
                         var ownedChat=chat
                         while(isActive) {
+                            while(muted.value) {state.value=state.value.copy(phase="Микрофон выключен",level=0f);delay(100)}
                             val settings=graph.vault.state.value.voice
                             state.value=VoiceState(mode,if(waiting) "Жду вызова «Люма»" else "Слушаю")
                             val capture=capture(loaded!!,waiting,settings.recognition=="cloud")
@@ -80,9 +88,11 @@ class VoiceController(private val graph: AppGraph) {
                             if(waiting) {
                                 if(!capture.activated) continue
                                 waiting=false
+                                screen.value=true
                                 if(text.isBlank() && !(settings.recognition=="cloud" && VoiceWav.voiced(capture.pcm))) {
-                                    state.value=state.value.copy(phase="Озвучиваю",partial="Я слушаю")
-                                    output.speak("Я слушаю",settings)
+                                    val welcome=SpeechLanguages.get(settings.language).listening
+                                    state.value=state.value.copy(phase="Озвучиваю",partial=welcome)
+                                    output.speak(welcome,settings)
                                     continue
                                 }
                             }
@@ -99,7 +109,7 @@ class VoiceController(private val graph: AppGraph) {
                             if(VoiceText.stop(text)) break
                             if(text.isBlank()) continue
                             state.value=state.value.copy(phase="Думаю",partial=text,level=0f)
-                            val result=graph.voiceTurn(text,agent,ownedChat)
+                            val result=graph.voiceTurn(text,graph.chats.agentMode.value,ownedChat)
                             ownedChat=result.first
                             state.value=state.value.copy(phase="Озвучиваю",partial=result.second)
                             output.speak(result.second,graph.vault.state.value.voice)
@@ -111,7 +121,7 @@ class VoiceController(private val graph: AppGraph) {
             } catch(e: CancellationException) {throw e}
             catch(e: LinkageError) {graph.uiMessage.value="Голосовой движок несовместим с этим устройством."}
             catch(e: Exception) {graph.uiMessage.value=if(e is UserError) e.message else "Голосовой режим остановлен. Проверьте микрофон, модель и настройки речи."}
-            finally {output.stop();state.value=VoiceState();onFinished()}
+            finally {screen.value=false;output.stop();state.value=VoiceState();onFinished()}
         }
     }
     private data class Capture(val text: String,val pcm: ByteArray,val activated: Boolean=false)
@@ -125,7 +135,8 @@ class VoiceController(private val graph: AppGraph) {
             Recognizer(model,16000f).use {recognizer ->
                 recognizer.setWords(true)
                 val aliases=graph.vault.state.value.voice.wakeWords
-                val keyword=if(wake) Recognizer(model,16000f,JSONArray(VoiceText.wakeGrammar(aliases)+"[unk]").toString()).apply {setWords(true);setPartialWords(true)} else null
+                val language=graph.vault.state.value.voice.language
+                val keyword=if(wake) Recognizer(model,16000f,JSONArray(VoiceText.wakeGrammar(aliases,language)+"[unk]").toString()).apply {setWords(true);setPartialWords(true)} else null
                 try {
                 recorder.startRecording()
                 if(recorder.recordingState!=AudioRecord.RECORDSTATE_RECORDING) throw UserError("Android не разрешил запись микрофона.")
@@ -139,6 +150,7 @@ class VoiceController(private val graph: AppGraph) {
                 }
                 while(true) {
                     ensureActive()
+                    if(muted.value) return@withContext Capture("",byteArrayOf())
                     val n=recorder.read(buffer,0,buffer.size)
                     if(n<=0) throw UserError("Запись микрофона прервалась.")
                     elapsed+=n
@@ -146,7 +158,7 @@ class VoiceController(private val graph: AppGraph) {
                     pcm.write(buffer,0,n)
                     if(keyword!=null && wakeEnd==null) {
                         val done=keyword.acceptWaveForm(buffer,n)
-                        wakeEnd=VoiceText.wakeEnd(JSONObject(if(done) keyword.result else keyword.partialResult),aliases)
+                        wakeEnd=VoiceText.wakeEnd(JSONObject(if(done) keyword.result else keyword.partialResult),aliases,language)
                     }
                     val ended=recognizer.acceptWaveForm(buffer,n)
                     val json=JSONObject(if(ended) recognizer.result else recognizer.partialResult)

@@ -16,7 +16,7 @@ import org.robolectric.annotation.Config
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk=[35],application=Application::class)
+@Config(sdk=[35],application=Application::class,shadows=[HostAtomicFileShadow::class])
 class VaultAgentTest {
     @Test fun unlimitedAgentPassesFortyStepsWithBoundedRequestContext()=runBlocking {
         val vault=SettingsVault(context);vault.saveConnection(Provider.GEMINI,"fake","")

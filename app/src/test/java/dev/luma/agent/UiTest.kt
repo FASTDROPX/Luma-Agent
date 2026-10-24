@@ -33,12 +33,12 @@ import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk=[35],application=LumaApp::class,qualifiers="w411dp-h891dp-mdpi")
+@Config(sdk=[35],application=LumaApp::class,qualifiers="w411dp-h891dp-mdpi",shadows=[HostAtomicFileShadow::class])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class UiTest {
     @get:Rule val compose=createAndroidComposeRule<androidx.activity.ComponentActivity>()
     private lateinit var graph: AppGraph
-    @Before fun setup(){TestKeys.install();graph=(ApplicationProvider.getApplicationContext<LumaApp>()).graph;runBlocking{graph.vault.update{it.copy(reducedMotion=true,dynamicColors=false,theme="dark")}}}
+    @Before fun setup(){I18n.choose("ru");TestKeys.install();graph=(ApplicationProvider.getApplicationContext<LumaApp>()).graph;runBlocking{graph.vault.update{it.copy(reducedMotion=true,dynamicColors=false,theme="dark",language="ru")}}}
     @After fun teardown(){graph.scope.coroutineContext[kotlinx.coroutines.Job]?.cancel();TestKeys.restore()}
     @Test fun composerHasTwoModesAndOptionsStayInASheet() {
         runBlocking {graph.vault.update {it.copy(onboarded=true)}}
@@ -295,7 +295,9 @@ class UiTest {
         compose.onNodeWithTag("model-instructions").performTextInput("Отвечай кратко")
         compose.onNodeWithText("Сохранить промпт").performScrollTo().performClick()
         compose.waitUntil(5000) {graph.vault.state.value.connection().generation().instruction=="Отвечай кратко"}
-        assertEquals("Отвечай кратко",SettingsVault(compose.activity).state.value.connection().generation().instruction)
+        val savedVault=SettingsVault(compose.activity)
+        assertNull(savedVault.loadError,savedVault.loadError)
+        assertEquals("Отвечай кратко",savedVault.state.value.connection().generation().instruction)
         screenshot("24-settings-model")
     }
     @Test @Config(qualifiers="w360dp-h640dp-mdpi")
@@ -319,7 +321,9 @@ class UiTest {
         compose.onNodeWithTag("confirm-full-access").performClick()
         compose.waitUntil(5000) {!graph.vault.state.value.confirmActions}
         compose.onNodeWithText("Полный доступ").assertIsDisplayed()
-        assertFalse(SettingsVault(compose.activity).state.value.confirmActions)
+        val savedVault=SettingsVault(compose.activity)
+        assertNull(savedVault.loadError,savedVault.loadError)
+        assertFalse(savedVault.state.value.confirmActions)
         screenshot("38-chat-full-access")
         compose.onNodeWithTag("agent-access-mode").performClick()
         compose.onNodeWithTag("access-mode-ask").performClick()

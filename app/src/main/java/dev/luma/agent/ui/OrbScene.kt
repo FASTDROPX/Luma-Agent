@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -78,7 +80,7 @@ import kotlin.math.*
     } else Modifier
     // Arrival trails and expanded orbits may extend beyond the reserved, unchanged layout slot.
     val bounds=if(!interactive && !scene.hasArrival) Modifier.clipToBounds() else Modifier
-    Canvas(flight.then(modifier).then(gestures).then(bounds).testTag("luma-orb").semantics {contentDescription="Сфера Luma"}) {
+    Canvas(flight.then(modifier).then(gestures).then(bounds).testTag("luma-orb").semantics {contentDescription=tr("Сфера Luma")}) {
         frame
         drawSatelliteOrb(scene,blue)
     }

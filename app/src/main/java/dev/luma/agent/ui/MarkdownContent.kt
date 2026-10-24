@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
@@ -75,7 +77,7 @@ internal object MarkdownEngine {
                         visitor.builder().append("🖼 ")
                         val alt=visitor.length()
                         visitor.visitChildren(image)
-                        if(visitor.length()==alt) visitor.builder().append("изображение")
+                        if(visitor.length()==alt) visitor.builder().append(tr("изображение"))
                         CoreProps.LINK_DESTINATION.set(visitor.renderProps(),image.destination)
                         visitor.setSpansForNode(org.commonmark.node.Link::class.java,start)
                     }

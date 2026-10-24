@@ -22,6 +22,8 @@ jobs:
         with:
           packages: 'platforms;android-35 build-tools;35.0.0 ndk;28.2.13676358 cmake;3.31.6'
       - uses: gradle/actions/setup-gradle@v4
+      - name: UI language catalogues
+        run: python3 tools/check_i18n.py
       - name: Unit tests, lint and debug build
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
       - name: Test reports

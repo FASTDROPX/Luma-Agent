@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import android.Manifest
 import android.content.Intent
 import android.os.Build
@@ -33,7 +35,7 @@ import dev.luma.agent.core.OptionalAccess
         if(uri!=null) try {
             context.contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             graph.update { it.copy(folder=uri.toString()) }
-        } catch (_: Exception) { graph.uiMessage.value="Не удалось сохранить доступ к папке." }
+        } catch (_: Exception) { graph.uiMessage.value=tr("Не удалось сохранить доступ к папке.") }
         next()
     }
     val runtime = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -41,10 +43,10 @@ import dev.luma.agent.core.OptionalAccess
     }
     FilledTonalButton(onClick={intro=true},enabled=!running,modifier=Modifier.fillMaxWidth().testTag("request-all-access")) {
         Icon(Icons.Outlined.DoneAll,null,Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
-        Text(if(running) "Настройка доступов…" else "Запросить все разом")
+        Text(if(running) tr("Настройка доступов…") else tr("Запросить все разом"))
     }
-    if(intro) AlertDialog(onDismissRequest={intro=false},title={Text("Запросить все доступы?")},text={
-        Text("Сначала Android покажет обычные запросы, затем Luma по очереди откроет специальные настройки и выбор папки. Управление экраном будет последним. Любой пункт можно пропустить.")
+    if(intro) AlertDialog(onDismissRequest={intro=false},title={Text(tr("Запросить все доступы?"))},text={
+        Text(tr("Сначала Android покажет обычные запросы, затем Luma по очереди откроет специальные настройки и выбор папки. Управление экраном будет последним. Любой пункт можно пропустить."))
     },confirmButton={TextButton(onClick={
         intro=false; running=true
         queue=buildList {
@@ -55,8 +57,8 @@ import dev.luma.agent.core.OptionalAccess
         val missing=OptionalAccess.items().filter {it.id!="background_location"}.flatMap {it.runtime()}.distinct()
             .filter {context.checkSelfPermission(it)!=android.content.pm.PackageManager.PERMISSION_GRANTED}
         if(missing.isNotEmpty()) {waiting=true;runtime.launch(missing.toTypedArray())}
-        else if(queue.isEmpty()) {running=false;graph.uiMessage.value="Все доступные разрешения уже выданы."}
-    }) {Text("Начать")}},dismissButton={TextButton(onClick={intro=false}) {Text("Отмена")}})
+        else if(queue.isEmpty()) {running=false;graph.uiMessage.value=tr("Все доступные разрешения уже выданы.")}
+    }) {Text(tr("Начать"))}},dismissButton={TextButton(onClick={intro=false}) {Text(tr("Отмена"))}})
     val id=queue.firstOrNull()
     val item=id?.let(OptionalAccess::item)
     // Recheck dependencies and grants at every step; never ask background location with foreground permission.
@@ -65,11 +67,11 @@ import dev.luma.agent.core.OptionalAccess
             (OptionalAccess.granted(context,id) || id=="background_location" && !OptionalAccess.granted(context,"location"))) next()
     }
     if(running && !waiting && id!=null) AlertDialog(onDismissRequest={running=false;queue=emptyList()},
-        title={Text(if(id=="workspace") "Папка для файлов" else item?.title ?: "Доступ")},
+        title={Text(if(id=="workspace") tr("Папка для файлов") else item?.title ?: tr("Доступ"))},
         text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text(if(id=="workspace") "Выберите папку, в которой агент сможет создавать файлы." else item?.purpose.orEmpty())
-            if(id=="accessibility") Text("В специальных возможностях выберите «Luma · управление телефоном» и включите службу. Это последний шаг.")
-            Text("Осталось пунктов: ${queue.size}",style=MaterialTheme.typography.labelMedium)
+            Text(if(id=="workspace") tr("Выберите папку, в которой агент сможет создавать файлы.") else item?.purpose.orEmpty())
+            if(id=="accessibility") Text(tr("В специальных возможностях выберите «Luma · управление телефоном» и включите службу. Это последний шаг."))
+            Text(tr("Осталось пунктов: {0}" ,queue.size),style=MaterialTheme.typography.labelMedium)
         }},confirmButton={TextButton(onClick={
             try {
                 waiting=true
@@ -79,10 +81,10 @@ import dev.luma.agent.core.OptionalAccess
                     else -> {
                         val screens=if(id=="background_location") OptionalAccess.appDetails(context) else item?.screens?.invoke(context).orEmpty()
                         val target=screens.firstOrNull {it.resolveActivity(context.packageManager)!=null}
-                        if(target==null) {graph.uiMessage.value="Этот экран настроек недоступен на устройстве.";next()} else special.launch(target)
+                        if(target==null) {graph.uiMessage.value=tr("Этот экран настроек недоступен на устройстве.");next()} else special.launch(target)
                     }
                 }
-            } catch (_: Exception) {graph.uiMessage.value="Android не открыл этот запрос. Пункт пропущен.";next()}
-        }) {Text(if(id=="workspace") "Выбрать папку" else "Открыть")}},
-        dismissButton={TextButton(onClick={next()}) {Text("Пропустить")}})
+            } catch (_: Exception) {graph.uiMessage.value=tr("Android не открыл этот запрос. Пункт пропущен.");next()}
+        }) {Text(if(id=="workspace") tr("Выбрать папку") else tr("Открыть"))}},
+        dismissButton={TextButton(onClick={next()}) {Text(tr("Пропустить"))}})
 }

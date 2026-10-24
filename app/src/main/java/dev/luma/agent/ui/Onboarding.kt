@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -29,7 +31,7 @@ import dev.luma.agent.AppGraph
     val reduced = LocalReducedMotion.current
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).imePadding().testTag("setup")) {
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (page > 0) IconButton(onClick = { page-- }) { Icon(Icons.Outlined.ArrowBack, "Назад") }
+            if (page > 0) IconButton(onClick = { page-- }) { Icon(Icons.Outlined.ArrowBack, tr("Назад")) }
             Text("Luma", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             Text("${page + 1} / 3", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(10.dp))
@@ -46,11 +48,11 @@ import dev.luma.agent.AppGraph
         if (!keyboardOpen) Surface(color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp).appear(if (page == 0) 18 else 1), horizontalAlignment = Alignment.CenterHorizontally) {
                 Button(onClick = { if (page < 2) page++ else graph.update { it.copy(onboarded = true) } }, enabled = page != 2 || settings.connection().model.isNotBlank(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("setup-next")) {
-                    Text(when (page) { 0 -> "Настроить доступ"; 1 -> "Подключить модель"; else -> "Открыть Luma" })
+                    Text(when (page) { 0 -> tr("Настроить доступ"); 1 -> tr("Подключить модель"); else -> tr("Открыть Luma") })
                     Spacer(Modifier.width(8.dp)); Icon(Icons.Outlined.ArrowForward, null, Modifier.size(18.dp))
                 }
                 TextButton(onClick = { if (page == 1) page++ else graph.update { it.copy(onboarded = true) } }, modifier = Modifier.testTag("setup-skip")) {
-                    Text(when (page) { 0 -> "Настроить позже"; 1 -> "Пропустить разрешения"; else -> "Подключить позже" })
+                    Text(when (page) { 0 -> tr("Настроить позже"); 1 -> tr("Пропустить разрешения"); else -> tr("Подключить позже") })
                 }
             }
         }
@@ -65,19 +67,19 @@ import dev.luma.agent.AppGraph
         Column(Modifier.fillMaxSize().padding(top = if (compact) 4.dp else 20.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 FlyingBadge(Modifier.size(if (compact) 56.dp else 76.dp), distance, animate, finished)
-                Text("Привет, я Luma", Modifier.weight(1f).appear(9), style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge)
+                Text(tr("Привет, я Luma"), Modifier.weight(1f).appear(9), style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge)
             }
             Spacer(Modifier.height(if (compact) 16.dp else 28.dp))
-            Text("Чат с ИИ\nи помощь на телефоне", Modifier.fillMaxWidth().appear(13), style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
+            Text(tr("Чат с ИИ\nи помощь на телефоне"), Modifier.fillMaxWidth().appear(13), style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
             if (showDescription) {
                 Spacer(Modifier.height(10.dp))
-                Text("Вопросы — в чат, действия — агенту.", Modifier.fillMaxWidth().appear(14), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(tr("Вопросы — в чат, действия — агенту."), Modifier.fillMaxWidth().appear(14), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(if (compact) 14.dp else 24.dp))
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                WelcomeFeature(Icons.Outlined.ChatBubbleOutline, "Чат с любой моделью", 15)
-                WelcomeFeature(Icons.Outlined.TouchApp, t("Агент действует за вас"), 16)
-                WelcomeFeature(Icons.Outlined.VerifiedUser, t("Доступ включаете вы"), 17)
+                WelcomeFeature(Icons.Outlined.ChatBubbleOutline, tr("Чат с любой моделью"), 15)
+                WelcomeFeature(Icons.Outlined.TouchApp, t(tr("Агент действует за вас")), 16)
+                WelcomeFeature(Icons.Outlined.VerifiedUser, t(tr("Доступ включаете вы")), 17)
             }
         }
     }

@@ -1,6 +1,8 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -75,7 +77,7 @@ import kotlin.math.roundToInt
                 } else {
                     val old=graph.drafts.get(result.chat)
                     graph.drafts.save(result.chat,listOf(old.text,result.text).filter {it.isNotBlank()}.joinToString(" ").take(12000),old.files)
-                    graph.uiMessage.value="Диктовка сохранена в черновик исходного чата."
+                    graph.uiMessage.value=tr("Диктовка сохранена в черновик исходного чата.")
                 }
             }
         }
@@ -108,9 +110,9 @@ import kotlin.math.roundToInt
                 for(uri in uris.take(4-files.size)) {
                     val file=graph.chats.attachments.importFile(uri)
                     if(graph.chats.selected.value==chat && files.sumOf {it.size}+file.size<=16_000_000) files=files+file
-                    else {withContext(Dispatchers.IO) {graph.chats.attachments.file(file).delete()};graph.uiMessage.value="Не больше 4 файлов и 16 МБ в одном сообщении."}
+                    else {withContext(Dispatchers.IO) {graph.chats.attachments.file(file).delete()};graph.uiMessage.value=tr("Не больше 4 файлов и 16 МБ в одном сообщении.")}
                 }
-                if(uris.size>4) graph.uiMessage.value="В одно сообщение можно добавить не больше 4 файлов."
+                if(uris.size>4) graph.uiMessage.value=tr("В одно сообщение можно добавить не больше 4 файлов.")
             } catch(e: CancellationException) {throw e}
             catch(e: Exception) {graph.uiMessage.value=safeError(e)}
             finally {importing=false}
@@ -122,7 +124,7 @@ import kotlin.math.roundToInt
     val permissionLauncher=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         graph.agent.resumeAccess()
         if (requestedPermissions.any { result[it] != true } && requestedPermissions.any { (context as? Activity)?.shouldShowRequestPermissionRationale(it) == false }) {
-            graph.uiMessage.value = "Доступ не выдан. Если Android больше не спрашивает, включите его в настройках Luma."
+            graph.uiMessage.value = tr("Доступ не выдан. Если Android больше не спрашивает, включите его в настройках Luma.")
             dev.luma.agent.core.BackgroundAccess.open(context, dev.luma.agent.core.OptionalAccess.appDetails(context))
         }
     }
@@ -140,7 +142,7 @@ import kotlin.math.roundToInt
             if (action.sender != null) toolSender.launch(androidx.activity.result.IntentSenderRequest.Builder(action.sender).build())
             else action.intent?.let { toolActivity.launch(it) }
         } catch (e: Exception) {
-            graph.uiMessage.value = "Android не смог открыть приложение для этого действия."
+            graph.uiMessage.value = tr("Android не смог открыть приложение для этого действия.")
             graph.agent.completeSystemAction(action.id, dev.luma.agent.core.SystemToolResult(Activity.RESULT_CANCELED)); systemActionId = null
         }
     }
@@ -149,7 +151,7 @@ import kotlin.math.roundToInt
             try {
                 context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                 graph.vault.update { it.copy(folder = uri.toString()) }; graph.agent.resumeAccess()
-            } catch (e: Exception) { graph.uiMessage.value = "Не удалось сохранить доступ к выбранной папке." }
+            } catch (e: Exception) { graph.uiMessage.value = tr("Не удалось сохранить доступ к выбранной папке.") }
         }
     }
     fun grantAccess(need: dev.luma.agent.core.PermissionNeed) {
@@ -254,7 +256,7 @@ import kotlin.math.roundToInt
                     if(pending) item(key="thinking") {
                         Row(Modifier.animateItem(fadeInSpec=null,placementSpec=null,fadeOutSpec=null).fillMaxWidth().heightIn(min=48.dp).padding(start=52.dp).onGloballyPositioned {answer=Offset(left,it.positionInRoot().y-origin.y+it.size.height/2f)},verticalAlignment=Alignment.CenterVertically) {
                             val elapsed=rememberElapsed(if(agentThinking) run.startedAt else chatStartedAt)
-                            Text(chatStatus ?: if(searching) "Ищу в интернете и готовлю ответ…" else "Готовлю ответ…",Modifier.weight(1f,fill=false),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
+                            Text(chatStatus ?: if(searching) tr("Ищу в интернете и готовлю ответ…") else tr("Готовлю ответ…"),Modifier.weight(1f,fill=false),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
                             if(elapsed>=1000) Text("  ${dev.luma.agent.core.formatElapsed(elapsed)}",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f))
                         }
                     }
@@ -286,7 +288,7 @@ import kotlin.math.roundToInt
             androidx.compose.animation.AnimatedVisibility(visible=!follow && messages.isNotEmpty(),modifier=Modifier.align(Alignment.BottomEnd).padding(12.dp),
                 enter=if(reduced) EnterTransition.None else fadeIn(tween(180))+scaleIn(tween(220),initialScale=.85f)+slideInVertically(tween(220)) {it/2},
                 exit=if(reduced) ExitTransition.None else fadeOut(tween(140))+scaleOut(tween(160),targetScale=.9f)) {
-                FilledTonalButton(onClick={follow=true;scrollEvents.trySend(Unit)}) {Icon(Icons.Outlined.ArrowDownward,null,Modifier.size(18.dp));Spacer(Modifier.width(6.dp));Text("К последнему")}
+                FilledTonalButton(onClick={follow=true;scrollEvents.trySend(Unit)}) {Icon(Icons.Outlined.ArrowDownward,null,Modifier.size(18.dp));Spacer(Modifier.width(6.dp));Text(tr("К последнему"))}
             }
             if(sendTick>0 && sending.value<1f) Surface(Modifier.align(Alignment.BottomEnd).padding(horizontal=20.dp,vertical=8.dp).widthIn(max=240.dp).graphicsLayer {this.alpha=(1f-sending.value)*.8f;translationY=-sending.value*56.dp.toPx();scaleX=1f-sending.value*.12f;scaleY=scaleX}.clearAndSetSemantics {},shape=RoundedCornerShape(22.dp),color=MaterialTheme.colorScheme.primaryContainer) {
                 Text(sentPreview,Modifier.padding(horizontal=16.dp,vertical=10.dp),maxLines=2,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.bodyMedium)
@@ -299,13 +301,13 @@ import kotlin.math.roundToInt
             Column(Modifier.padding(horizontal=10.dp,vertical=2.dp).testTag("chat-composer")) {
                 Row(Modifier.padding(start=4.dp).height(40.dp),verticalAlignment=Alignment.CenterVertically) {
                   Row(Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
-                    FilterChip(!asAgent,{graph.setAgentMode(false)},label={Text("Чат")},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(15.dp))})
-                    FilterChip(asAgent,{graph.setAgentMode(true)},label={Text("Агент")},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(15.dp))})
+                    FilterChip(!asAgent,{graph.setAgentMode(false)},label={Text(tr("Чат"))},leadingIcon={Icon(Icons.Outlined.ChatBubbleOutline,null,Modifier.size(15.dp))})
+                    FilterChip(asAgent,{graph.setAgentMode(true)},label={Text(tr("Агент"))},leadingIcon={Icon(Icons.Outlined.Bolt,null,Modifier.size(15.dp))})
                   }
                   IconButton(onClick={optionsOpen=true},modifier=Modifier.testTag("chat-options")) {
-                      Icon(Icons.Outlined.Tune,"Параметры чата",tint=if(searching || settings.deepThinking && asAgent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                      Icon(Icons.Outlined.Tune,tr("Параметры чата"),tint=if(searching || settings.deepThinking && asAgent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                   }
-                  if(asAgent && !screenConnected) IconButton(onClick=openAccess,modifier=Modifier.testTag("screen-access-needed")) {Icon(Icons.Outlined.Security,"Доступ агента",Modifier.size(20.dp))}
+                  if(asAgent && !screenConnected) IconButton(onClick=openAccess,modifier=Modifier.testTag("screen-access-needed")) {Icon(Icons.Outlined.Security,tr("Доступ агента"),Modifier.size(20.dp))}
                 }
                 if(files.isNotEmpty()) AttachmentStrip(files,graph.chats.attachments) {file ->
                     if(!busy && files.any {it.id==file.id}) {files=files.filterNot {it.id==file.id};scope.launch(Dispatchers.IO) {graph.chats.attachments.file(file).delete()}}
@@ -313,14 +315,14 @@ import kotlin.math.roundToInt
                 if(importing) LumaProgress(Modifier.fillMaxWidth().padding(vertical=4.dp))
                 // Attach, text and send share one 44 dp line; with more lines the buttons stay at the bottom.
                 Row(Modifier.fillMaxWidth().padding(vertical=2.dp),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.Bottom) {
-                    IconButton(onClick={picker.launch(arrayOf("*/*"))},enabled=!busy && !run.active && !importing && files.size<4,modifier=Modifier.size(44.dp).testTag("chat-attach")) {Icon(Icons.Outlined.Add,"Прикрепить файлы",Modifier.size(24.dp))}
-                    BasicTextField(input,{if(it.text.length<=12_000) input=it else graph.uiMessage.value="Сократите сообщение до 12 000 символов."},
+                    IconButton(onClick={picker.launch(arrayOf("*/*"))},enabled=!busy && !run.active && !importing && files.size<4,modifier=Modifier.size(44.dp).testTag("chat-attach")) {Icon(Icons.Outlined.Add,tr("Прикрепить файлы"),Modifier.size(24.dp))}
+                    BasicTextField(input,{if(it.text.length<=12_000) input=it else graph.uiMessage.value=tr("Сократите сообщение до 12 000 символов.")},
                         Modifier.weight(1f).heightIn(min=40.dp).padding(vertical=9.dp).testTag("chat-input"),
                         textStyle=MaterialTheme.typography.bodyLarge.copy(color=MaterialTheme.colorScheme.onSurface),maxLines=4,
                         cursorBrush=SolidColor(MaterialTheme.colorScheme.primary),decorationBox={field ->
-                            Box {if(input.text.isEmpty()) Text(if(asAgent) "Какую задачу выполнить?" else t("Напиши сообщение…"),style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f),maxLines=1,overflow=TextOverflow.Ellipsis);field()}
+                            Box {if(input.text.isEmpty()) Text(if(asAgent) tr("Какую задачу выполнить?") else t(tr("Напиши сообщение…")),style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.7f),maxLines=1,overflow=TextOverflow.Ellipsis);field()}
                         })
-                    VoiceStart(graph,"dictation","Диктовать сообщение",Icons.Outlined.Mic,compact=true)
+                    VoiceStart(graph,"dictation",tr("Диктовать сообщение"),Icons.Outlined.Mic,compact=true)
                     GradientActionButton(busy || run.active,!importing && (input.text.isNotBlank() || files.isNotEmpty()),sendTick,::submit,diameter=44.dp)
                 }
                 AgentAccessMode(settings.confirmActions,enabled=!busy && !run.active) {ask->graph.update {it.copy(confirmActions=ask)}}
@@ -329,20 +331,20 @@ import kotlin.math.roundToInt
     }
     if(optionsOpen) ModalBottomSheet(onDismissRequest={optionsOpen=false}) {
         Column(Modifier.fillMaxWidth().padding(horizontal=24.dp).padding(bottom=28.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text("Параметры чата",style=MaterialTheme.typography.headlineSmall)
-            VoiceStart(graph,"conversation","Голосовой разговор",Icons.Outlined.Headphones)
-            VoiceStart(graph,"wake","Вызов «Люма» в фоне",Icons.Outlined.Hearing)
+            Text(tr("Параметры чата"),style=MaterialTheme.typography.headlineSmall)
+            VoiceStart(graph,"conversation",tr("Голосовой разговор"),Icons.Outlined.Headphones)
+            VoiceStart(graph,"wake",tr("Вызов «Люма» в фоне"),Icons.Outlined.Hearing)
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Icon(Icons.Outlined.TravelExplore,null);Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {Text("Поиск в интернете");Text("Находить источники и читать страницы",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                Column(Modifier.weight(1f)) {Text(tr("Поиск в интернете"));Text(tr("Находить источники и читать страницы"),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
                 Switch(searching,{graph.update {s->s.copy(webSearch=it)}},Modifier.testTag("chat-web-search"))
             }
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Psychology,null);Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {Text("Глубокие размышления");Text("В режиме агента: разбирать неудачи и выбирать другой способ",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                Column(Modifier.weight(1f)) {Text(tr("Глубокие размышления"));Text(tr("В режиме агента: разбирать неудачи и выбирать другой способ"),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
                 Switch(settings.deepThinking,{graph.update {s->s.copy(deepThinking=it)}},Modifier.testTag("chat-deep-thinking"))
             }
-            TextButton(onClick={optionsOpen=false;openAccess()}) {Icon(Icons.Outlined.Security,null);Spacer(Modifier.width(8.dp));Text("Доступы и рабочая папка")}
+            TextButton(onClick={optionsOpen=false;openAccess()}) {Icon(Icons.Outlined.Security,null);Spacer(Modifier.width(8.dp));Text(tr("Доступы и рабочая папка"))}
         }
     }
 }
@@ -362,19 +364,19 @@ import kotlin.math.roundToInt
                 val trim = (placeable.height * .13f).roundToInt()
                 layout(placeable.width, placeable.height - 2 * trim) { placeable.place(0, -trim) }
             })
-            if (room >= 135.dp) Text("Привет, я Luma", style = MaterialTheme.typography.titleLarge)
-            if (room >= 330.dp) Text(t("Напишите вопрос или поручите задачу"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (room >= 135.dp) Text(tr("Привет, я Luma"), style = MaterialTheme.typography.titleLarge)
+            if (room >= 330.dp) Text(t(tr("Напишите вопрос или поручите задачу")), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (needsModel && room >= 110.dp) Surface(onClick = connect, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth().testTag("chat-connect")) {
                 Row(Modifier.heightIn(min = 52.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(20.dp))
-                    Text("Подключить модель", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                    Text(tr("Подключить модель"), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                     Icon(Icons.Outlined.ArrowForward, null, Modifier.size(20.dp))
                 }
             }
             if (room >= 160.dp) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Suggestion(Modifier.weight(1f).testTag("suggest-idea"), if (icons) Icons.Outlined.Lightbulb else null, "Идея") { select("Помоги придумать необычную идею для проекта", false) }
-                Suggestion(Modifier.weight(1f).testTag("suggest-app"), if (icons) Icons.Outlined.Apps else null, "Открыть") { select("Найди и открой приложение ", true) }
-                Suggestion(Modifier.weight(1f).testTag("suggest-files"), if (icons) Icons.Outlined.FolderOpen else null, "Файлы") { select("Покажи, что есть в выбранной папке", true) }
+                Suggestion(Modifier.weight(1f).testTag("suggest-idea"), if (icons) Icons.Outlined.Lightbulb else null, tr("Идея")) { select(tr("Помоги придумать необычную идею для проекта"), false) }
+                Suggestion(Modifier.weight(1f).testTag("suggest-app"), if (icons) Icons.Outlined.Apps else null, tr("Открыть")) { select(tr("Найди и открой приложение "), true) }
+                Suggestion(Modifier.weight(1f).testTag("suggest-files"), if (icons) Icons.Outlined.FolderOpen else null, tr("Файлы")) { select(tr("Покажи, что есть в выбранной папке"), true) }
             }
         }
     }
@@ -444,37 +446,37 @@ import kotlin.math.roundToInt
             // The chat orb (44 dp) is drawn over this slot, so it and its particles stay inside the card.
             Spacer(orbSlot.size(44.dp))
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) { Text(if (run.permission != null) "Нужен доступ" else if (run.approval != null) "Нужно подтверждение" else if (run.paused) "Агент на паузе" else "Luma работает", style = MaterialTheme.typography.titleSmall); Text((if(maxSteps==0) "Шаг ${run.step} · без лимита" else "Шаг ${run.step} из $maxSteps") + " · ${dev.luma.agent.core.formatElapsed(elapsed)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("run-timer"))
+            Column(Modifier.weight(1f)) { Text(if (run.permission != null) tr("Нужен доступ") else if (run.approval != null) tr("Нужно подтверждение") else if (run.paused) tr("Агент на паузе") else tr("Luma работает"), style = MaterialTheme.typography.titleSmall); Text((if(maxSteps==0) tr("Шаг {0} · без лимита" ,run.step) else tr("Шаг {0} из {1}" ,run.step,maxSteps)) + " · ${dev.luma.agent.core.formatElapsed(elapsed)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("run-timer"))
                 if (meterActive) TokenMeter(stats, run.active && run.approval == null && !run.paused, Modifier.offset(x = (-6).dp)) }
-            IconButton(onClick = stop) { Icon(Icons.Outlined.StopCircle, "Остановить") }
+            IconButton(onClick = stop) { Icon(Icons.Outlined.StopCircle, tr("Остановить")) }
         }
         AnimatedContent(run.approval?.title ?: run.stage, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(120)) }, label = "run stage") { stage ->
             Text(t(stage), style = MaterialTheme.typography.bodyMedium)
         }
         if (run.approval == null && run.permission == null && run.systemAction == null) RunLog(run.log)
         run.permission?.let { need ->
-            Text(need.purpose, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Выдайте доступ «${need.title}» для продолжения. После выдачи Luma продолжит этот шаг автоматически.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(tr(need.purpose), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(tr("Выдайте доступ «{0}» для продолжения. После выдачи Luma продолжит этот шаг автоматически." ,need.title), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { grantAccess(need) }, modifier = Modifier.weight(1f).testTag("grant-access")) { Icon(Icons.Outlined.LockOpen, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Выдать доступ") }
-                OutlinedButton(onClick = skipAccess, modifier = Modifier.weight(1f)) { Text("Пропустить") }
+                Button(onClick = { grantAccess(need) }, modifier = Modifier.weight(1f).testTag("grant-access")) { Icon(Icons.Outlined.LockOpen, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(tr("Выдать доступ")) }
+                OutlinedButton(onClick = skipAccess, modifier = Modifier.weight(1f)) { Text(tr("Пропустить")) }
             }
         }
         run.permission?.fallback?.let { alternative ->
-            Text(alternative, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedButton(onClick = fallbackAccess, modifier = Modifier.fillMaxWidth().testTag("continue-without-access")) { Text("Продолжить без доступа") }
+            Text(tr(alternative), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = fallbackAccess, modifier = Modifier.fillMaxWidth().testTag("continue-without-access")) { Text(tr("Продолжить без доступа")) }
         }
         run.systemAction?.let { action ->
-            Text(action.title, style = MaterialTheme.typography.bodyMedium)
-            Text("Продолжите в системном окне. После возвращения Luma проверит результат.", style = MaterialTheme.typography.bodySmall)
-            Button(onClick = { launchSystemAction(action) }, enabled = !systemActionBusy, modifier = Modifier.fillMaxWidth().testTag("system-tool-action")) { Text(if (systemActionBusy) "Ожидаю результат Android" else "Продолжить") }
+            Text(tr(action.title), style = MaterialTheme.typography.bodyMedium)
+            Text(tr("Продолжите в системном окне. После возвращения Luma проверит результат."), style = MaterialTheme.typography.bodySmall)
+            Button(onClick = { launchSystemAction(action) }, enabled = !systemActionBusy, modifier = Modifier.fillMaxWidth().testTag("system-tool-action")) { Text(if (systemActionBusy) tr("Ожидаю результат Android") else tr("Продолжить")) }
         }
         run.approval?.let { approval ->
             Text(t(approval.details), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (approval.background) Text("После разрешения Luma свернётся и продолжит действие в предыдущем приложении.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = approve, modifier = Modifier.weight(1f)) { Text("Разрешить") }; OutlinedButton(onClick = reject, modifier = Modifier.weight(1f)) { Text("Отменить") } }
-        } ?: if(run.retryPending) Button(onClick=retry,modifier=Modifier.fillMaxWidth()) {Icon(Icons.Outlined.Refresh,null);Spacer(Modifier.width(8.dp));Text("Повторить запрос")}
-        else OutlinedButton(onClick = pause, modifier = Modifier.fillMaxWidth()) { Icon(if (run.paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause, null); Spacer(Modifier.width(8.dp)); Text(if (run.paused) "Продолжить" else "Пауза") }
+            if (approval.background) Text(tr("После разрешения Luma свернётся и продолжит действие в предыдущем приложении."), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = approve, modifier = Modifier.weight(1f)) { Text(tr("Разрешить")) }; OutlinedButton(onClick = reject, modifier = Modifier.weight(1f)) { Text(tr("Отменить")) } }
+        } ?: if(run.retryPending) Button(onClick=retry,modifier=Modifier.fillMaxWidth()) {Icon(Icons.Outlined.Refresh,null);Spacer(Modifier.width(8.dp));Text(tr("Повторить запрос"))}
+        else OutlinedButton(onClick = pause, modifier = Modifier.fillMaxWidth()) { Icon(if (run.paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause, null); Spacer(Modifier.width(8.dp)); Text(if (run.paused) tr("Продолжить") else tr("Пауза")) }
     }
 }
 
@@ -486,13 +488,13 @@ import kotlin.math.roundToInt
     Row(Modifier.offset(x=(-10).dp),verticalAlignment=Alignment.CenterVertically) {
         if(message.text.isNotBlank()) IconButton(onClick={clipboard.setText(androidx.compose.ui.text.AnnotatedString(message.text));copied=true},Modifier.size(36.dp).testTag("copy-${message.id}")) {
             Crossfade(copied,animationSpec=tween(180),label="copied") {done ->
-                Icon(if(done) Icons.Outlined.Check else Icons.Outlined.ContentCopy,if(done) "Скопировано" else "Копировать ответ",Modifier.size(17.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(if(done) Icons.Outlined.Check else Icons.Outlined.ContentCopy,if(done) tr("Скопировано") else tr("Копировать ответ"),Modifier.size(17.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if(message.text.isNotBlank()) IconButton(onClick=speak,Modifier.size(36.dp).testTag("speak-${message.id}")) {Icon(if(speaking) Icons.Outlined.StopCircle else Icons.Outlined.VolumeUp,if(speaking) "Остановить озвучку" else "Озвучить ответ",Modifier.size(18.dp))}
-        if(more!=null) IconButton(onClick=more,Modifier.size(36.dp).testTag("more-${message.id}")) {Icon(Icons.Outlined.MoreHoriz,"Ещё",Modifier.size(18.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)}
+        if(message.text.isNotBlank()) IconButton(onClick=speak,Modifier.size(36.dp).testTag("speak-${message.id}")) {Icon(if(speaking) Icons.Outlined.StopCircle else Icons.Outlined.VolumeUp,if(speaking) tr("Остановить озвучку") else tr("Озвучить ответ"),Modifier.size(18.dp))}
+        if(more!=null) IconButton(onClick=more,Modifier.size(36.dp).testTag("more-${message.id}")) {Icon(Icons.Outlined.MoreHoriz,tr("Ещё"),Modifier.size(18.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)}
         message.stats?.let {stats ->
-            val parts=listOfNotNull(stats.outputPerSecond?.let {"↓ ${dev.luma.agent.core.formatRate(it)} т/с"},stats.totalMs.takeIf {it>0}?.let {"%.1f с".format(java.util.Locale.ROOT,it/1000.0).replace('.',',')})
+            val parts=listOfNotNull(stats.outputPerSecond?.let {tr("↓ {0} т/с" ,dev.luma.agent.core.formatRate(it))},stats.totalMs.takeIf {it>0}?.let {tr("%.1f с").format(java.util.Locale.ROOT,it/1000.0).replace('.',',')})
             if(parts.isNotEmpty()) Text(parts.joinToString(" · "),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.75f))
         }
     }

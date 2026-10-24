@@ -1,5 +1,7 @@
 package dev.luma.agent.ui
 
+import dev.luma.agent.core.tr
+
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -50,8 +52,8 @@ import java.util.Locale
                         } ?: error("output unavailable")
                     } ?: error("source unavailable")
                 }
-                "Копия файла сохранена"
-            } catch (_: Exception) {"Не удалось сохранить файл. Проверьте доступ к исходному файлу и место в памяти."}
+                tr("Копия файла сохранена")
+            } catch (_: Exception) {tr("Не удалось сохранить файл. Проверьте доступ к исходному файлу и место в памяти.")}
             finally {saving=false}
         }
     }
@@ -68,11 +70,11 @@ import java.util.Locale
                         Text("$date · $size",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     IconButton(onClick={selected=file.json().toString();download.launch(file.name)},enabled=!saving,modifier=Modifier.testTag("generated-download")) {
-                        if(saving) LumaLoading(Modifier.size(22.dp)) else Icon(Icons.Outlined.ArrowDownward,"Скачать ${file.name}",Modifier.size(21.dp))
+                        if(saving) LumaLoading(Modifier.size(22.dp)) else Icon(Icons.Outlined.ArrowDownward,tr("Скачать {0}" ,file.name),Modifier.size(21.dp))
                     }
                     IconButton(onClick={scope.launch {
-                        note=withContext(Dispatchers.IO) {runCatching {openGeneratedFile(context,file);null}.getOrElse {"Не удалось открыть файл. Возможно, он перемещён или доступ к папке отозван."}}
-                    }},modifier=Modifier.testTag("generated-open")) {Icon(Icons.Outlined.SouthEast,"Открыть ${file.name}",Modifier.size(21.dp))}
+                        note=withContext(Dispatchers.IO) {runCatching {openGeneratedFile(context,file);null}.getOrElse {tr("Не удалось открыть файл. Возможно, он перемещён или доступ к папке отозван.")}}
+                    }},modifier=Modifier.testTag("generated-open")) {Icon(Icons.Outlined.SouthEast,tr("Открыть {0}" ,file.name),Modifier.size(21.dp))}
                 }
             }
         }

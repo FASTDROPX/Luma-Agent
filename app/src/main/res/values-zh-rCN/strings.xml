@@ -1,0 +1,5 @@
+<resources>
+    <string name="accessibility_label">Luma · 手机控制</string>
+    <string name="tile_label">Luma 面板</string>
+    <string name="accessibility_description">Luma 仅执行您启动的任务：读取可访问的屏幕元素、点击、滚动和输入文字。启用截图后，截图可能会发送给您选择的 AI 模型。服务不会在后台录制屏幕。您可以从面板、应用或通知中停止任务。</string>
+</resources>

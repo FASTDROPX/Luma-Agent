@@ -1,0 +1,5 @@
+<resources>
+    <string name="accessibility_label">Luma · contrôle du téléphone</string>
+    <string name="tile_label">Panneau Luma</string>
+    <string name="accessibility_description">Luma exécute uniquement les tâches que vous lancez : lire les éléments accessibles à l’écran, toucher, faire défiler et saisir du texte. Si vous les activez, les captures d’écran peuvent être envoyées au modèle d’IA choisi. Le service n’enregistre pas l’écran en arrière-plan. Arrêtez une tâche depuis le panneau, l’application ou la notification.</string>
+</resources>

@@ -34,7 +34,8 @@ class AgentController(private val context: Context, private val scope: Coroutine
     /** Provider/model pairs whose server rejected native tool calls in this session; they use JSON commands. */
     private val jsonOnly = mutableSetOf<String>()
 
-    fun start(chat: Long, goal: String, finished: () -> Unit) {
+    fun start(chat: Long, goal: String, finished: () -> Unit) = start(chat,goal,null,finished)
+    fun start(chat: Long, goal: String, responseLanguage: String?,finished: () -> Unit) {
         if (job?.isActive == true) return
         val settings = vault.state.value; val connection = settings.connection()
         stoppedMessage = "Задача остановлена."
@@ -96,7 +97,7 @@ class AgentController(private val context: Context, private val scope: Coroutine
                             environment = withContext(Dispatchers.IO) { TaskEnvironment.capture(context, screen() != null, environmentFolder) }
                         }
                         val generation = generateRecovering(settings, connection, step, native, { memory.turns(vault.state.value.screenshots) },
-                            { useNative -> ModelPrompts.agent(vault.state.value, connection, screen() != null, environment, useNative) }) {
+                            { useNative -> ModelPrompts.agent(vault.state.value, connection, screen() != null, environment, useNative)+ModelPrompts.voiceLanguage(responseLanguage) }) {
                             native = false; jsonOnly += modelKey
                         }
                         val raw = generation.text

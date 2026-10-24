@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import dev.luma.agent.core.tr
 import dev.luma.agent.core.RunState
 import kotlinx.coroutines.*
 
@@ -28,10 +29,10 @@ class AgentTaskService : Service() {
         }
         if (chat == 0L || goal.isBlank()) { completed = true; stopSelf(); return START_NOT_STICKY }
         completed = false; watcher?.cancel()
-        getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("agent", "Работа агента", NotificationManager.IMPORTANCE_LOW))
+        getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("agent", tr("Работа агента"), NotificationManager.IMPORTANCE_LOW))
         val notification = notification(RunState(stage = "Подготавливаю задачу"))
         if (Build.VERSION.SDK_INT >= 34) startForeground(11, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(11, notification)
-        graph.agent.start(chat, goal) { completed = true; notifyFinished(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId) }
+        graph.agent.start(chat, goal,intent?.getStringExtra("responseLanguage")) { completed = true; notifyFinished(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId) }
         watcher = scope.launch { graph.agent.state.collect { state ->
             if (state.active && (Build.VERSION.SDK_INT < 33 || checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED))
                 getSystemService(NotificationManager::class.java).notify(11, notification(state))
@@ -42,9 +43,9 @@ class AgentTaskService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(this, 1, Intent(this, AgentTaskService::class.java).setAction("STOP"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val text = if (state.permission != null) "Выдайте доступ в чате: ${state.permission.title}" else if (state.systemAction != null) "Продолжите действие в чате Luma" else if (state.approval != null) "Нужно ваше подтверждение" else if (state.paused) "На паузе" else state.stage
-        return Notification.Builder(this, "agent").setSmallIcon(R.drawable.ic_luma).setContentTitle("Luma выполняет задачу").setContentText(text)
+        return Notification.Builder(this, "agent").setSmallIcon(R.drawable.ic_luma).setContentTitle(tr("Luma выполняет задачу")).setContentText(tr(text))
             .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).setVisibility(Notification.VISIBILITY_PRIVATE)
-            .addAction(Notification.Action.Builder(null, "Остановить", stop).build()).build()
+            .addAction(Notification.Action.Builder(null, tr("Остановить"), stop).build()).build()
     }
     /** While Luma is in the background, a finished task gets its own notification with sound and vibration. */
     private fun notifyFinished() {
@@ -52,11 +53,11 @@ class AgentTaskService : Service() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
         val state = graph.agent.state.value
         val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel("agent-done", "Задача завершена", NotificationManager.IMPORTANCE_DEFAULT).apply { enableVibration(true) })
+        manager.createNotificationChannel(NotificationChannel("agent-done", tr("Задача завершена"), NotificationManager.IMPORTANCE_DEFAULT).apply { enableVibration(true) })
         val time = if (state.startedAt > 0) " · " + dev.luma.agent.core.formatElapsed(android.os.SystemClock.elapsedRealtime() - state.startedAt) else ""
         val open = PendingIntent.getActivity(this, 2, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         manager.notify(12, Notification.Builder(this, "agent-done").setSmallIcon(R.drawable.ic_luma)
-            .setContentTitle(if (state.error != null) "Luma: нужна помощь" else "Luma закончила задачу$time")
+            .setContentTitle(if (state.error != null) tr("Luma: нужна помощь") else tr("Luma закончила задачу{0}",time))
             .setContentText(dev.luma.agent.core.Tone.adapt(state.error ?: "Шагов: ${state.step}. Откройте чат, чтобы посмотреть итог.", graph.vault.state.value.formal))
             .setContentIntent(open).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build())
     }

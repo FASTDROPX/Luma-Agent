@@ -4,6 +4,9 @@ import org.json.JSONObject
 
 /** User instructions stay in the system role for every supported provider. */
 object ModelPrompts {
+    fun voiceLanguage(code: String?): String = SpeechLanguages.all.firstOrNull {it.code==code}?.let {
+        "\nFor this voice conversation, write the final answer in ${it.name}. Keep tool names, tool arguments, file names and quoted text unchanged."
+    }.orEmpty()
     fun chat(connection: Connection, formal: Boolean = false): String =
         "Ты Luma, дружелюбный и точный помощник. Отвечай по-русски, если пользователь не попросил иначе. " +
         "Это обычный чат: у тебя нет доступа к экрану и файлам, ты не можешь выполнять действия на телефоне. " +

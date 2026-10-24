@@ -16,7 +16,7 @@ data class SharedContent(val text: String, val uris: List<android.net.Uri>)
 data class ConnectionCheck(val busy: Boolean = false, val reply: String? = null, val stats: TokenStats? = null, val error: String? = null)
 class LumaApp : Application() {
     lateinit var graph: AppGraph; private set
-    override fun onCreate() { super.onCreate(); graph = AppGraph(this) }
+    override fun onCreate() { super.onCreate(); graph = AppGraph(this);I18n.initialize(this,graph.vault.state.value.language) }
 }
 class AppGraph(val context: Context) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -108,7 +108,7 @@ class AppGraph(val context: Context) {
             } catch (e: CancellationException) { throw e } catch (e: Exception) { ConnectionCheck(error = safeError(e)) }
         }
     }
-    fun send(text: String, asAgent: Boolean,files: List<Attachment> = emptyList(),targetChat: Long? = null): Boolean {
+    fun send(text: String, asAgent: Boolean,files: List<Attachment> = emptyList(),targetChat: Long? = null,responseLanguage: String?=null): Boolean {
         val clean = text.trim().ifBlank {if(files.isNotEmpty()) "Проанализируй вложенные файлы" else ""}
         if (clean.isBlank() || chatBusy.value || agent.state.value.active) return false
         if (clean.length > 12_000) { uiMessage.value = "Сообщение слишком длинное. Сократите его до 12 000 символов."; return false }
@@ -125,9 +125,9 @@ class AppGraph(val context: Context) {
                 if (asAgent) {
                     val token = java.util.UUID.randomUUID().toString()
                     pendingAgentRequest = token
-                    context.startForegroundService(Intent(context, AgentTaskService::class.java).putExtra("chat", id).putExtra("goal", clean).putExtra("request", token))
+                    context.startForegroundService(Intent(context, AgentTaskService::class.java).putExtra("chat", id).putExtra("goal", clean).putExtra("request", token).putExtra("responseLanguage",responseLanguage))
                     withTimeout(5000) { agent.state.first { it.active && it.chatId == id } }
-                } else answer(id)
+                } else answer(id,responseLanguage)
             } catch (e: CancellationException) { }
             // The error belongs to the chat that sent the message, even if the user has opened another one.
             catch (e: Exception) { fail(chatId, e) }
@@ -140,7 +140,7 @@ class AppGraph(val context: Context) {
         if(chatBusy.value || agent.state.value.active) throw UserError("Дождитесь завершения текущего ответа.")
         val id=chat ?: chats.ensure(text)
         val after=chats.lastAssistant(id)?.id ?: 0L
-        if(!send(text,asAgent,targetChat=id)) throw UserError(uiMessage.value ?: "Не удалось отправить голосовой запрос.")
+        if(!send(text,asAgent,targetChat=id,responseLanguage=vault.state.value.voice.outputLanguage)) throw UserError(uiMessage.value ?: "Не удалось отправить голосовой запрос.")
         val revision=chatRevision
         try {
             chatJob?.join()
@@ -154,10 +154,10 @@ class AppGraph(val context: Context) {
         }
     }
     /** Asks the model for the next answer of [chat] from its history and stores text, reasoning and pictures. */
-    private suspend fun answer(chat: Long) {
+    private suspend fun answer(chat: Long,responseLanguage: String?=null) {
         val settings = vault.state.value; val connection = settings.connection()
         val turns = chats.history(chat, connection.generation().contextTurns).dropWhile { it.role != "user" }
-        val system = ModelPrompts.chat(connection, settings.formal)
+        val system = ModelPrompts.chat(connection, settings.formal)+ModelPrompts.voiceLanguage(responseLanguage)
         val painter = connection.models.firstOrNull { it.id == connection.model }?.imageOutput == true
         // Search: the provider's own where it has one (unless Luma's is chosen), Luma's tools for every other model.
         val reply = if (settings.webSearch && !painter && !settings.search.native(settings.provider)) try {

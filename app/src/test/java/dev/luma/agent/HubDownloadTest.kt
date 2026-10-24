@@ -19,7 +19,7 @@ import org.robolectric.shadows.ShadowStatFs
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk=[35],application=Application::class)
+@Config(sdk=[35],application=Application::class,shadows=[HostAtomicFileShadow::class])
 class HubDownloadTest {
     private lateinit var context: Context
     private lateinit var folder: File
@@ -42,8 +42,12 @@ class HubDownloadTest {
         assertEquals(id,restored.state.value.single().id)
         restored.refresh();assertEquals(HubPhase.READY,restored.state.value.single().phase)
         assertEquals(downloaded.canonicalPath,restored.fileForShare(id).canonicalPath)
-        val uri=FileProvider.getUriForFile(context,"${context.packageName}.model-files",downloaded)
-        assertEquals("content",uri.scheme)
+        // FileProvider compares Android POSIX paths using '/'; Windows canonical paths use backslashes.
+        // The URI assertion runs on Linux CI; download/persistence checks above run on both hosts.
+        if(File.separatorChar=='/') {
+            val uri=FileProvider.getUriForFile(context,"${context.packageName}.model-files",downloaded)
+            assertEquals("content",uri.scheme)
+        }
         restored.remove(id);assertFalse(downloaded.exists());assertTrue(HubDownloads(context).state.value.isEmpty())
     }
     @Test fun corruptedCompletionRemainsAnErrorAndProviderCannotExposeVault() = runBlocking {

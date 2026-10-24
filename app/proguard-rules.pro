@@ -17,3 +17,5 @@
 -keep class dev.luma.agent.core.LlamaNative { *; }
 -keep class dev.luma.agent.core.NativeReply { *; }
 -keep class dev.luma.agent.core.NativeProgress { *; }
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-keep class dev.luma.agent.core.SpeechCancelCallback { *; }

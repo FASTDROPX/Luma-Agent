@@ -92,7 +92,8 @@ data class AppSettings(
     /** «Глубокие размышления»: the agent analyses a failed step and tries another way instead of repeating it. */
     val deepThinking: Boolean = false,
     val voice: VoiceSettings = VoiceSettings(),
-    val localContext: Int = 8192, val localThreads: Int = 0
+    val localContext: Int = 8192, val localThreads: Int = 0,
+    val language: String = "system"
 ) {
     val formal: Boolean get() = tone == "formal"
     fun connection(p: Provider = provider) = connections[p] ?: Connection()
@@ -103,7 +104,7 @@ data class AppSettings(
     }
     fun json(): JSONObject {
         val config = JSONObject(); connections.forEach { (p, c) -> config.put(p.name, c.json()) }
-        return JSONObject().put("version", 2).put("onboarded", onboarded).put("provider", provider.name)
+        return JSONObject().put("version", 2).put("language",language).put("onboarded", onboarded).put("provider", provider.name)
             .put("connections", config).put("theme", theme).put("dynamicColors", dynamicColors)
             .put("reducedMotion", reducedMotion).put("panel", panel).put("screenshots", screenshots)
             .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
@@ -128,7 +129,8 @@ data class AppSettings(
                 json.optString("blockedWords").take(BlockedWords.MAX_LENGTH), json.optBoolean("tokenMeter", true),
                 json.optDouble("chatTextScale", 1.0).toFloat().let { if (it.isFinite()) it.coerceIn(.85f, 1.4f) else 1f }, json.optBoolean("haptics", true),
                 json.optInt("agentTokenLimit", 0).coerceIn(0, 5000), json.optString("tone", "friendly").takeIf { it in listOf("friendly", "formal") } ?: "friendly",
-                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"), WebSearchSettings.parse(json.optJSONObject("search")), json.optBoolean("deepThinking"), VoiceSettings.parse(json.optJSONObject("voice")),json.optInt("localContext",8192).coerceIn(2048,16384),json.optInt("localThreads",0).coerceIn(0,8))
+                json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"), WebSearchSettings.parse(json.optJSONObject("search")), json.optBoolean("deepThinking"), VoiceSettings.parse(json.optJSONObject("voice")),json.optInt("localContext",8192).coerceIn(2048,16384),json.optInt("localThreads",0).coerceIn(0,8),
+                json.optString("language","system").takeIf {it in setOf("system","ru","en","zh","de","fr")} ?: "system")
         }
     }
 }

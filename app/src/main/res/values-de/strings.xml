@@ -1,0 +1,5 @@
+<resources>
+    <string name="accessibility_label">Luma · Telefonsteuerung</string>
+    <string name="tile_label">Luma-Panel</string>
+    <string name="accessibility_description">Luma führt nur Aufgaben aus, die Sie starten: verfügbare Bildschirmelemente lesen, tippen, scrollen und Text eingeben. Falls aktiviert, können Bildschirmfotos an Ihr gewähltes KI-Modell gesendet werden. Der Dienst zeichnet den Bildschirm nicht im Hintergrund auf. Aufgaben können im Panel, in der App oder über die Benachrichtigung gestoppt werden.</string>
+</resources>

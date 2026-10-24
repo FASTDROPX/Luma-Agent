@@ -29,7 +29,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = Application::class)
+@Config(sdk = [35], application = Application::class,shadows=[HostAtomicFileShadow::class])
 class DirectActionsTest {
     private lateinit var context: Application
     @Before fun setup() { TestKeys.install(); context = ApplicationProvider.getApplicationContext(); File(context.noBackupFilesDir, "luma-vault.bin").delete() }

@@ -87,7 +87,7 @@
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.model-files" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/model_file_paths"/>
         </provider>
-        <service android:name=".AgentAccessibilityService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true" android:label="Luma · управление телефоном">
+        <service android:name=".AgentAccessibilityService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true" android:label="@string/accessibility_label">
             <intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter>
             <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service"/>
         </service>
@@ -109,7 +109,7 @@
         <service android:name=".LumaNotificationListener" android:label="Luma" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true">
             <intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter>
         </service>
-        <service android:name=".PanelTileService" android:label="Панель Luma" android:icon="@drawable/ic_luma" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE" android:exported="true">
+        <service android:name=".PanelTileService" android:label="@string/tile_label" android:icon="@drawable/ic_luma" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE" android:exported="true">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE"/></intent-filter>
         </service>
     </application>

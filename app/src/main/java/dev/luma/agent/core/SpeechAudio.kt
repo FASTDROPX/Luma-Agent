@@ -68,7 +68,7 @@ class CloudSpeech internal constructor(private val transport: (suspend (Request)
     }
     suspend fun transcribe(s: VoiceSettings,pcm: ByteArray): String = withContext(Dispatchers.IO) {
         val form=MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("model",s.sttModel)
-            .addFormDataPart("language","ru").addFormDataPart("response_format","json")
+            .addFormDataPart("language",s.language).addFormDataPart("response_format","json")
             .addFormDataPart("file","voice.wav",VoiceWav.encode(pcm).toRequestBody("audio/wav".toMediaType())).build()
         response(request(s,"transcriptions").post(form).build()) {r ->
             checked(r);val bytes=r.body?.byteStream()?.use {it.boundedVoiceBytes(100_000)} ?: byteArrayOf()
@@ -92,12 +92,21 @@ private fun java.io.InputStream.boundedVoiceBytes(max: Int): ByteArray {
     return out.toByteArray()
 }
 
-data class DeviceVoice(val id: String,val label: String)
+data class DeviceVoice(val id: String,val label: String,val language: String="ru")
+/** The JNI API looks up invoke(float[]) with a boxed Integer return; an indy lambda has only the generic bridge. */
+class SpeechCancelCallback(private val active: ()->Boolean): (FloatArray)->Int {
+    override fun invoke(samples: FloatArray): Int = if(active()) 1 else 0
+}
 class SpeechOutput(private val context: Context) {
+    val level=MutableStateFlow(0f)
+    lateinit var packs: SpeechPacks
     val voices=MutableStateFlow<List<DeviceVoice>>(emptyList())
     private var tts: TextToSpeech?=null
     private var initialized: CompletableDeferred<Unit>?=null
     private val completions=java.util.concurrent.ConcurrentHashMap<String,CompletableDeferred<Unit>>()
+    private val envelopes=java.util.concurrent.ConcurrentHashMap<String,SpeechEnvelope>()
+    private val levelScope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
+    private var levelJob: Job?=null
     private val cloud=CloudSpeech()
     private var player: MediaPlayer?=null
     private var focus: AudioFocusRequest?=null
@@ -114,12 +123,19 @@ class SpeechOutput(private val context: Context) {
         return tts!!.also {engine ->
             engine.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             engine.setOnUtteranceProgressListener(object: UtteranceProgressListener() {
-                override fun onStart(id: String?) {}
-                override fun onDone(id: String?) {id?.let {completions.remove(it)?.complete(Unit)}}
+                override fun onBeginSynthesis(id: String?,rate: Int,format: Int,channels: Int) {id?.let {envelopes[it]=SpeechEnvelope(rate,channels,format)}}
+                override fun onAudioAvailable(id: String?,audio: ByteArray?) {if(id!=null && audio!=null) envelopes[id]?.append(audio)}
+                override fun onStart(id: String?) {
+                    val started=android.os.SystemClock.elapsedRealtime()
+                    levelJob?.cancel();levelJob=levelScope.launch {while(isActive && id!=null && completions.containsKey(id)) {
+                        level.value=envelopes[id]?.at(android.os.SystemClock.elapsedRealtime()-started) ?: 0f;delay(40)
+                    }}
+                }
+                override fun onDone(id: String?) {id?.let {envelopes.remove(it);completions.remove(it)?.complete(Unit)};level.value=0f}
                 @Deprecated("Android legacy callback") override fun onError(id: String?) {id?.let {completions.remove(it)?.completeExceptionally(UserError("Не удалось озвучить ответ. Проверьте голосовые данные Android."))}}
             })
             voices.value=engine.voices.orEmpty().filter {!it.isNetworkConnectionRequired && "notInstalled" !in it.features.orEmpty()}
-                .sortedWith(compareBy({if(it.locale.language=="ru") 0 else 1},{it.name})).map {DeviceVoice(it.name,"${it.locale.getDisplayName(Locale("ru"))} · ${it.name}")}
+                .sortedWith(compareBy({if(it.locale.language=="ru") 0 else 1},{it.name})).map {DeviceVoice(it.name,"${it.locale.getDisplayName()} · ${it.name}",it.locale.language)}
         }
     }
     suspend fun speak(text: String,s: VoiceSettings) {
@@ -132,15 +148,16 @@ class SpeechOutput(private val context: Context) {
         try {coroutineScope {
             val watch=launch {lost.await();this@coroutineScope.cancel(CancellationException("Audio focus lost"))}
             try {
-                if(s.synthesis=="cloud") for(chunk in VoiceText.chunks(text)) play(cloud.synthesize(s,chunk),attributes)
+                if(s.synthesis=="piper") speakPack(text,s,attributes)
+                else if(s.synthesis=="cloud") for(chunk in VoiceText.chunks(text,language=s.outputLanguage)) play(cloud.synthesize(s,chunk),attributes)
                 else {
                     val engine=engine()
                     val voice=if(s.deviceVoice.isNotBlank()) engine.voices?.firstOrNull {it.name==s.deviceVoice && !it.isNetworkConnectionRequired}
                         ?: throw UserError("Выбранный голос недоступен. Выберите другой в настройках голоса.")
-                    else engine.voices?.firstOrNull {it.locale.language=="ru" && !it.isNetworkConnectionRequired && "notInstalled" !in it.features.orEmpty()}
-                        ?: throw UserError("Установите русский офлайн-голос в настройках синтеза речи Android.")
+                    else engine.voices?.firstOrNull {it.locale.language==s.outputLanguage && !it.isNetworkConnectionRequired && "notInstalled" !in it.features.orEmpty()}
+                        ?: throw UserError("Установите офлайн-голос выбранного языка в настройках синтеза речи Android или скачайте голос Luma.")
                     engine.voice=voice;engine.setSpeechRate(s.speed)
-                    for(chunk in VoiceText.chunks(text)) {
+                    for(chunk in VoiceText.chunks(text,language=s.outputLanguage)) {
                         val id=UUID.randomUUID().toString();val done=CompletableDeferred<Unit>();completions[id]=done
                         try {if(engine.speak(chunk,TextToSpeech.QUEUE_FLUSH,null,id)==TextToSpeech.ERROR) throw UserError("Не удалось начать озвучку.")
                             withTimeout(300000) {done.await()}
@@ -154,18 +171,57 @@ class SpeechOutput(private val context: Context) {
         val file=File.createTempFile("speech-",".mp3",context.cacheDir)
         try {
             withContext(Dispatchers.IO) {file.writeBytes(bytes)}
+            val envelope=withContext(Dispatchers.IO) {try {SpeechEnvelope.decode(file)} catch(e: CancellationException) {throw e} catch(_: Exception) {null}}
             val media=MediaPlayer();player=media
             try {
                 media.setAudioAttributes(attributes);media.setDataSource(file.path)
-                suspendCancellableCoroutine<Unit> {c ->
-                    media.setOnPreparedListener {if(c.isActive) it.start()}
+                coroutineScope {
+                var prepared=false
+                val monitor=launch {while(isActive) {if(prepared && media.isPlaying) level.value=envelope?.at(media.currentPosition.toLong()) ?: 0f;delay(40)}}
+                try {suspendCancellableCoroutine<Unit> {c ->
+                    media.setOnPreparedListener {prepared=true;if(c.isActive) it.start()}
                     media.setOnCompletionListener {if(c.isActive) c.resume(Unit)}
                     media.setOnErrorListener {_,_,_->if(c.isActive) c.resumeWithException(UserError("Не удалось воспроизвести аудио речевого API."));true}
                     media.prepareAsync()
+                }} finally {monitor.cancel();level.value=0f}
                 }
             } finally {media.release();if(player===media) player=null}
         } finally {withContext(NonCancellable+Dispatchers.IO) {file.delete()}}
     }
-    fun stop() {tts?.stop();completions.values.forEach {it.cancel()};completions.clear();runCatching {player?.pause()}}
-    fun close() {stop();tts?.shutdown();tts=null;initialized=null;focus?.let {manager.abandonAudioFocusRequest(it)};focus=null}
+    private suspend fun speakPack(text: String,s: VoiceSettings,attributes: AudioAttributes)=withContext(Dispatchers.IO) {
+        val pack=SpeechPacks.selected(s)
+        if(!packs.ready(pack)) throw UserError("Сначала скачайте выбранный голос в настройках → Голос.")
+        val folder=packs.directory(pack)
+        val model=folder.listFiles().orEmpty().first {it.extension=="onnx"}
+        val config=com.k2fsa.sherpa.onnx.OfflineTtsConfig(model=com.k2fsa.sherpa.onnx.OfflineTtsModelConfig(
+            vits=com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig(model=model.path,tokens=File(folder,"tokens.txt").path,
+                dataDir=File(folder,"espeak-ng-data").takeIf {it.isDirectory}?.path.orEmpty(),lexicon=File(folder,"lexicon.txt").takeIf {it.isFile}?.path.orEmpty()),numThreads=2))
+        val engine=com.k2fsa.sherpa.onnx.OfflineTts(config=config)
+        try {
+            for(chunk in VoiceText.chunks(text,350,s.outputLanguage)) {
+                ensureActive()
+                val coroutine=currentCoroutineContext()
+                val audio=engine.generateWithCallback(chunk,speed=s.speed,callback=SpeechCancelCallback {coroutine.isActive})
+                ensureActive()
+                if(audio.samples.isEmpty()) throw UserError("Голос не смог озвучить текст выбранного языка.")
+                val track=AudioTrack.Builder().setAudioAttributes(attributes).setAudioFormat(AudioFormat.Builder().setSampleRate(audio.sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_FLOAT).build())
+                    .setBufferSizeInBytes(maxOf(AudioTrack.getMinBufferSize(audio.sampleRate,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_FLOAT),8192))
+                    .setTransferMode(AudioTrack.MODE_STREAM).build()
+                try {
+                    track.play();var offset=0
+                    while(offset<audio.samples.size) {ensureActive();val end=minOf(offset+audio.sampleRate/20,audio.samples.size)
+                        var energy=0.0;for(i in offset until end) energy+=audio.samples[i]*audio.samples[i]
+                        level.value=(kotlin.math.sqrt(energy/(end-offset))*5).toFloat().coerceIn(0f,1f)
+                        val count=track.write(audio.samples,offset,end-offset,AudioTrack.WRITE_BLOCKING)
+                        if(count<=0) throw UserError("Воспроизведение голоса прервалось.");offset+=count
+                    }
+                    val duration=audio.samples.size.toLong()*1000/audio.sampleRate
+                    withTimeout(duration+5000) {while(track.playbackHeadPosition<audio.samples.size) {ensureActive();delay(20)}}
+                } finally {track.stop();track.release();level.value=0f}
+            }
+        } finally {engine.release()}
+    }
+    fun stop() {levelJob?.cancel();envelopes.clear();level.value=0f;tts?.stop();completions.values.forEach {it.cancel()};completions.clear();runCatching {player?.pause()}}
+    fun close() {stop();levelScope.cancel();tts?.shutdown();tts=null;initialized=null;focus?.let {manager.abandonAudioFocusRequest(it)};focus=null}
 }
