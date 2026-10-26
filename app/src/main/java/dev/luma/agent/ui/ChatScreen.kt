@@ -245,7 +245,9 @@ import kotlin.math.roundToInt
         }
         VoicePanel(graph)
         Surface(Modifier.padding(horizontal=12.dp,vertical=4.dp).fillMaxWidth(),shape=RoundedCornerShape(26.dp),
-            color=MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha=.76f),shadowElevation=6.dp,
+            // Opaque, unelevated surface: translucent hardware shadows can leave a
+            // rectangular backing on some Android renderers (especially in light themes).
+            color=MaterialTheme.colorScheme.surfaceContainerHigh,shadowElevation=0.dp,
             border=BorderStroke(.8.dp,MaterialTheme.colorScheme.outlineVariant.copy(alpha=.35f))) {
             Column(Modifier.padding(horizontal=10.dp,vertical=2.dp).testTag("chat-composer")) {
                 Row(Modifier.padding(start=4.dp).height(40.dp),verticalAlignment=Alignment.CenterVertically) {

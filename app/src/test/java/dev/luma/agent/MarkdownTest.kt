@@ -31,6 +31,24 @@ class MarkdownTest {
         assertTrue((70 until 350).all {x ->(0 until view.height).all {y ->android.graphics.Color.alpha(bitmap.getPixel(x,y))==0}})
         view.dispose()
     }
+    @Test fun completedParseReplacesEarlierParseEvenWithTheSameSourceKey() {
+        val context=ApplicationProvider.getApplicationContext<Application>()
+        val engine=MarkdownEngine.create(context,darkPalette,18f)
+        val view=MarkdownView(context).apply {layoutParams=android.view.ViewGroup.LayoutParams(280,-2)}
+        val source=(1..18).joinToString("\n\n") {"Paragraph $it: a reply that must wrap onto several lines."}
+        // A producer can deliver another parse under the same key after an earlier update.
+        view.display(engine,engine.toMarkdown("First line"),source,false)
+        fun height(): Int {
+            view.measure(View.MeasureSpec.makeMeasureSpec(280,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED))
+            view.layout(0,0,280,view.measuredHeight)
+            return view.height
+        }
+        val short=height()
+        view.display(engine,engine.toMarkdown(source),source,false)
+        assertTrue(view.text.toString().contains("Paragraph 18"))
+        assertTrue(height()>short*10)
+        view.dispose()
+    }
     private val sample="""
 # Заголовок
 

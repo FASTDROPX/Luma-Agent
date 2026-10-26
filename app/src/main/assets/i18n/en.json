@@ -1796,5 +1796,9 @@
   "Скачать модель распознавания": "Download speech model",
   "Сначала скачайте модель распознавания в настройках → Голос.": "Download the speech recognition model in Settings → Voice first.",
   "Для установки распознавания нужно ещё {0} МБ свободного места.": "Speech recognition installation needs {0} MB of free space.",
-  "Файл модели повреждён. Повторите загрузку.": "The model file is damaged. Download it again."
+  "Файл модели повреждён. Повторите загрузку.": "The model file is damaged. Download it again.",
+  "Архитектура этой GGUF не поддерживается встроенным движком. Qwen3-ASR предназначена для распознавания речи, а не текстового чата. Выберите текстовую instruct-модель.": "This GGUF architecture is not supported by the built-in engine. Qwen3-ASR is for speech recognition, not text chat. Choose a text instruct model.",
+  "Движку не удалось выделить память. Закройте другие приложения, уменьшите контекст или выберите меньшую модель.": "The engine could not allocate memory. Close other apps, reduce the context or choose a smaller model.",
+  "Не удалось прочитать GGUF. Файл может быть неполным, повреждённым или несовместимым с этой версией движка. Попробуйте другую текстовую instruct-модель.": "Could not read the GGUF. The file may be incomplete, damaged or incompatible with this engine version. Try another text instruct model.",
+  "Эта GGUF не подходит для текстового чата. Модели ASR распознают речь; embedding, reranker и проекторы тоже не предназначены для диалога. Выберите текстовую instruct-модель.": "This GGUF is not suitable for text chat. ASR models recognize speech; embedding models, rerankers and projectors are not chat models either. Choose a text instruct model."
 }

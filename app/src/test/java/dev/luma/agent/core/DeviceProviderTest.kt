@@ -36,6 +36,16 @@ class DeviceProviderTest {
         assertTrue(downloadError(IOException()).contains("сохранённая часть"))
         assertFalse(downloadError(UnknownHostException()).contains("мест"))
     }
+    @Test fun localLoadErrorsDistinguishArchitectureFileAndActualAllocationFailures() {
+        val architecture=deviceFailure("LUMA_ARCH")
+        assertTrue(architecture.contains("Архитектура"))
+        assertTrue(architecture.contains("Qwen3-ASR"))
+        assertFalse(architecture.contains("памят"))
+        assertFalse(deviceFailure("LUMA_MODEL").contains("памят"))
+        assertTrue(deviceFailure("LUMA_MEMORY").contains("выделить память"))
+        assertTrue(deviceFailure("LUMA_MODEL_TYPE").contains("ASR"))
+        assertTrue(deviceFailure("LUMA_CONTEXT:9000:8192").contains("Контекст"))
+    }
     @Test fun recognitionFilesArePinnedAndDoNotLoadOldModels() {
         assertEquals(4,VoiceModel.WHISPER_ASSETS.size)
         assertEquals(376129181L,VoiceModel.pack("en").size)

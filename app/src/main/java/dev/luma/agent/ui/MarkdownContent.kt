@@ -124,6 +124,7 @@ internal class MarkdownView(context: Context): TextView(context) {
     var growth: ()->Unit={}
     private var sourceKey=""
     private var renderer: Markwon?=null
+    private var parsedText: Spanned?=null
     private var full: Spannable?=null
     private var graphemes=GraphemeMap("")
     private var animator: ValueAnimator?=null
@@ -132,10 +133,10 @@ internal class MarkdownView(context: Context): TextView(context) {
     private var previousHeight=-1
     init {includeFontPadding=false;setLineSpacing(3*resources.displayMetrics.density,1f);setTextIsSelectable(true);movementMethod=LinkMovementMethod.getInstance();setPadding(0,0,0,2)}
     fun display(markwon: Markwon,parsed: Spanned,key: String,animate: Boolean) {
-        if(sourceKey==key && renderer===markwon && full!=null) return
+        if(sourceKey==key && renderer===markwon && parsedText===parsed && full!=null) return
         val fresh=sourceKey!=key || full==null
         if(fresh) {animator?.cancel();fraction=if(animate) 0f else 1f}
-        sourceKey=key;renderer=markwon
+        sourceKey=key;renderer=markwon;parsedText=parsed
         markwon.setParsedMarkdown(this,parsed);full=text as? Spannable;graphemes=GraphemeMap(text.toString())
         setReveal(fraction)
         if(fresh && animate) {
@@ -216,7 +217,11 @@ internal data class MarkdownPalette(val ink: Int,val accent: Int,val code: Int,v
         colors.primary.copy(alpha=.55f).toArgb(),colors.outlineVariant.toArgb())
     val size=with(density) {MaterialTheme.typography.bodyLarge.fontSize.toPx()}*LocalChatTextScale.current
     val renderer=remember(context,palette,size) {MarkdownEngine.create(context,palette,size)}
-    val parsed by produceState<Spanned?>(null,source,renderer) {value=withContext(Dispatchers.Default) {renderer.toMarkdown(normalizeMath(source))}}
+    // produceState keeps its previous value when only its keys change. A parse from
+    // the previous source must never be installed under the new source's cache key.
+    val parsed by key(source,renderer) {
+        produceState<Spanned?>(null) {value=withContext(Dispatchers.Default) {renderer.toMarkdown(normalizeMath(source))}}
+    }
     val longPress by rememberUpdatedState(onLongPress)
     AndroidView(factory={MarkdownView(it)},modifier=modifier,onRelease={it.dispose()},update={view ->
         view.setTextColor(ink);view.setTextSize(TypedValue.COMPLEX_UNIT_PX,size)

@@ -7,6 +7,9 @@
 #include <vector>
 #include <stdexcept>
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <new>
 
 // Kotlin serializes load/generate/free. Cancellation alone can run concurrently.
 static std::atomic<bool> cancelled{false};
@@ -18,17 +21,36 @@ static std::string bytes(JNIEnv * e, jbyteArray a) {
     e->GetByteArrayRegion(a,0,n,reinterpret_cast<jbyte *>(s.data())); return s;
 }
 static void fail(JNIEnv * e,const std::string & message) { e->ThrowNew(e->FindClass("java/lang/IllegalStateException"),message.c_str()); }
+// llama.cpp returns nullptr after catching loader exceptions. Preserve the failure
+// category before it is discarded; never expose paths, tensor dumps or prompts in UI.
+static thread_local bool loading=false;
+static thread_local bool unsupported_arch=false;
+static thread_local bool allocation_failed=false;
+static void native_log(ggml_log_level level,const char * text,void *) {
+    if(loading && level==GGML_LOG_LEVEL_ERROR && text) {
+        if(std::strstr(text,"unknown model architecture") || std::strstr(text,"unsupported model architecture")) unsupported_arch=true;
+        if(std::strstr(text,"failed to allocate") || std::strstr(text,"cannot allocate memory") || std::strstr(text,"bad_alloc")) allocation_failed=true;
+    }
+    if(text) std::fputs(text,stderr);
+}
+struct LoadDiagnostics {
+    LoadDiagnostics() {unsupported_arch=false;allocation_failed=false;loading=true;}
+    ~LoadDiagnostics() {loading=false;}
+};
 extern "C" JNIEXPORT void JNICALL Java_dev_luma_agent_core_LlamaNative_resetCancel(JNIEnv *,jobject) {cancelled=false;}
 extern "C" JNIEXPORT void JNICALL Java_dev_luma_agent_core_LlamaNative_cancel(JNIEnv *,jobject) {cancelled=true;}
 extern "C" JNIEXPORT jlong JNICALL Java_dev_luma_agent_core_LlamaNative_load(JNIEnv * e,jobject,jbyteArray path) {
     try {
+        llama_log_set(native_log,nullptr);
+        LoadDiagnostics diagnostics;
         llama_backend_init(); auto p=llama_model_default_params();p.n_gpu_layers=0;
         p.progress_callback=load_progress;
         auto model=llama_model_load_from_file(bytes(e,path).c_str(),p);
-        if (!model) throw std::runtime_error(cancelled ? "LUMA_CANCELLED" : "LUMA_MODEL");
+        if (!model) throw std::runtime_error(cancelled ? "LUMA_CANCELLED" : unsupported_arch ? "LUMA_ARCH" : allocation_failed ? "LUMA_MEMORY" : "LUMA_MODEL");
         if(!llama_model_has_decoder(model) || llama_model_has_encoder(model)) {llama_model_free(model);throw std::runtime_error("LUMA_MODEL_TYPE");}
         return reinterpret_cast<jlong>(model);
-    } catch(const std::exception & ex) {fail(e,ex.what());return 0;}
+    } catch(const std::bad_alloc &) {fail(e,"LUMA_MEMORY");return 0;}
+      catch(const std::exception & ex) {fail(e,ex.what());return 0;}
 }
 extern "C" JNIEXPORT void JNICALL Java_dev_luma_agent_core_LlamaNative_free(JNIEnv *,jobject,jlong h) {if(h) llama_model_free(reinterpret_cast<llama_model *>(h));}
 
@@ -97,5 +119,6 @@ extern "C" JNIEXPORT jobject JNICALL Java_dev_luma_agent_core_LlamaNative_genera
         auto type=e->FindClass("dev/luma/agent/core/NativeReply");
         auto ctor=e->GetMethodID(type,"<init>","([BIIJJZ)V");
         auto result=e->NewObject(type,ctor,array,n,generated,(jlong)first,(jlong)elapsed(),(jboolean)!finished);e->DeleteLocalRef(array);return result;
-    } catch(const std::exception & ex) {fail(e,ex.what());return nullptr;}
+    } catch(const std::bad_alloc &) {fail(e,"LUMA_MEMORY");return nullptr;}
+      catch(const std::exception & ex) {fail(e,ex.what());return nullptr;}
 }

@@ -1,6 +1,5 @@
 package dev.luma.agent.core
 
-import android.app.ActivityManager
 import android.content.Context
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,8 +41,9 @@ class DeviceEngine(private val context: Context,private val models: DeviceModels
                         val file=models.file(connection.model)
                         if(file.name.matches(Regex(".*-\\d{5}-of-\\d{5}\\.gguf"))) throw UserError("Выберите одиночный GGUF: запуск разделённых моделей пока не поддерживается.")
                         if(handle!=0L) {LlamaNative.free(handle);handle=0;loadedId=""}
-                        val memory=ActivityManager.MemoryInfo().also {context.getSystemService(ActivityManager::class.java).getMemoryInfo(it)}
-                        if(file.length()+256L*1024*1024>memory.availMem) throw UserError("Для этой модели сейчас не хватает оперативной памяти. Выберите меньшую модель или квантование Q4.")
+                        // GGUF weights are memory mapped. File size + a fixed margin is not
+                        // the allocation size; availMem is not a per-process allocation budget.
+                        // Let the native allocator report actual model/context failures.
                         state.value=DeviceEngineState(connection.model,true,"Загружаю модель в память")
                         handle=LlamaNative.load(file.path.toByteArray(Charsets.UTF_8));loadedId=connection.model
                     }
@@ -78,14 +78,19 @@ class DeviceEngine(private val context: Context,private val models: DeviceModels
                 }} finally {withContext(NonCancellable) {watch.cancelAndJoin()}}
             }
         } catch(e: CancellationException) {throw e}
-        catch(e: IllegalStateException) {currentCoroutineContext().ensureActive();throw UserError(when {
-            e.message.orEmpty().startsWith("LUMA_CONTEXT")->"Контекст модели заполнен. Увеличьте контекст в «Модели → На телефоне» или сократите запрос."
-            e.message.orEmpty().contains("LUMA_TEMPLATE")->"Шаблон диалога этой модели пока не поддерживается. Выберите instruct-модель Qwen, Llama, Gemma или SmolLM."
-            e.message.orEmpty().contains("LUMA_MODEL_TYPE")->"Эта GGUF не является поддерживаемой моделью диалога. Выберите текстовую instruct-модель; embedding и reranker не подходят."
-            e.message.orEmpty().contains("LUMA_MODEL")->"Не удалось загрузить GGUF: проверьте файл, поддержку архитектуры и свободную оперативную память."
-            else->"Встроенный движок остановил вычисление. Уменьшите контекст или выберите меньшую модель."
-        })}
+        catch(e: IllegalStateException) {currentCoroutineContext().ensureActive();throw UserError(deviceFailure(e.message.orEmpty()))}
         finally {if(state.value.busy) state.value=DeviceEngineState(loadedId,false,if(loadedId.isEmpty()) "Модель не загружена" else "Модель загружена · CPU")}
     }
 }
 private fun <T> List<T>.indexOfFirstFrom(start: Int,predicate: (T)->Boolean): Int {for(i in start until size) if(predicate(this[i])) return i;return -1}
+
+/** Native failures have distinct causes; unsupported GGUFs must not be diagnosed as low RAM. */
+internal fun deviceFailure(code: String): String=when {
+    code.startsWith("LUMA_CONTEXT")->"Контекст модели заполнен. Увеличьте контекст в «Модели → На телефоне» или сократите запрос."
+    code.startsWith("LUMA_TEMPLATE")->"Шаблон диалога этой модели пока не поддерживается. Выберите instruct-модель Qwen, Llama, Gemma или SmolLM."
+    code.startsWith("LUMA_MODEL_TYPE")->"Эта GGUF не подходит для текстового чата. Модели ASR распознают речь; embedding, reranker и проекторы тоже не предназначены для диалога. Выберите текстовую instruct-модель."
+    code.startsWith("LUMA_ARCH")->"Архитектура этой GGUF не поддерживается встроенным движком. Qwen3-ASR предназначена для распознавания речи, а не текстового чата. Выберите текстовую instruct-модель."
+    code.startsWith("LUMA_MEMORY")->"Движку не удалось выделить память. Закройте другие приложения, уменьшите контекст или выберите меньшую модель."
+    code.startsWith("LUMA_MODEL")->"Не удалось прочитать GGUF. Файл может быть неполным, повреждённым или несовместимым с этой версией движка. Попробуйте другую текстовую instruct-модель."
+    else->"Встроенный движок остановил вычисление. Уменьшите контекст или выберите меньшую модель."
+}
