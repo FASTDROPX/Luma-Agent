@@ -93,7 +93,8 @@ data class AppSettings(
     val deepThinking: Boolean = false,
     val voice: VoiceSettings = VoiceSettings(),
     val localContext: Int = 8192, val localThreads: Int = 0,
-    val language: String = "system"
+    val language: String = "system",
+    val localCacheK: KvCacheType = KvCacheType.F16, val localCacheV: KvCacheType = KvCacheType.F16
 ) {
     val formal: Boolean get() = tone == "formal"
     fun connection(p: Provider = provider) = connections[p] ?: Connection()
@@ -110,7 +111,7 @@ data class AppSettings(
             .put("confirmActions", confirmActions).put("folder", folder).put("visuals",visuals.json())
             .put("maxSteps",maxSteps.coerceIn(5,30)).put("taskMinutes",taskMinutes.coerceIn(2,15)).put("unlimitedAgent", unlimitedAgent)
             .put("blockedWords", blockedWords.take(BlockedWords.MAX_LENGTH)).put("tokenMeter", tokenMeter)
-            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch).put("search", search.json()).put("deepThinking", deepThinking).put("voice",voice.json()).put("localContext",localContext).put("localThreads",localThreads)
+            .put("chatTextScale", chatTextScale.toDouble()).put("haptics", haptics).put("agentTokenLimit", agentTokenLimit).put("tone", tone).put("toolCalling", toolCalling).put("webSearch", webSearch).put("search", search.json()).put("deepThinking", deepThinking).put("voice",voice.json()).put("localContext",localContext).put("localThreads",localThreads).put("localCacheK",localCacheK.id).put("localCacheV",localCacheV.id)
     }
     companion object {
         fun parse(json: JSONObject): AppSettings {
@@ -130,7 +131,8 @@ data class AppSettings(
                 json.optDouble("chatTextScale", 1.0).toFloat().let { if (it.isFinite()) it.coerceIn(.85f, 1.4f) else 1f }, json.optBoolean("haptics", true),
                 json.optInt("agentTokenLimit", 0).coerceIn(0, 5000), json.optString("tone", "friendly").takeIf { it in listOf("friendly", "formal") } ?: "friendly",
                 json.optString("toolCalling", "auto").takeIf { it in TOOL_CALLING_MODES } ?: "auto", json.optBoolean("webSearch"), WebSearchSettings.parse(json.optJSONObject("search")), json.optBoolean("deepThinking"), VoiceSettings.parse(json.optJSONObject("voice")),json.optInt("localContext",8192).coerceIn(2048,16384),json.optInt("localThreads",0).coerceIn(0,8),
-                json.optString("language","system").takeIf {it in setOf("system","ru","en","zh","de","fr")} ?: "system")
+                json.optString("language","system").takeIf {it in setOf("system","ru","en","zh","de","fr")} ?: "system",
+                KvCacheType.parse(json.optString("localCacheK")),KvCacheType.parse(json.optString("localCacheV")))
         }
     }
 }

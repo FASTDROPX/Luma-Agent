@@ -17,7 +17,7 @@ object LlamaNative {
     external fun cancel()
     external fun load(path: ByteArray): Long
     external fun free(handle: Long)
-    external fun generate(handle: Long,roles: Array<ByteArray>,contents: Array<ByteArray>,context: Int,maxOutput: Int,temperature: Float,topP: Float,threads: Int,progress: NativeProgress): NativeReply
+    external fun generate(handle: Long,roles: Array<ByteArray>,contents: Array<ByteArray>,context: Int,maxOutput: Int,temperature: Float,topP: Float,threads: Int,cacheK: Int,cacheV: Int,progress: NativeProgress): NativeReply
 }
 data class DeviceEngineState(val model: String="",val busy: Boolean=false,val status: String="Модель не загружена")
 class DeviceEngine(private val context: Context,private val models: DeviceModels,private val settings: ()->AppSettings) {
@@ -61,7 +61,7 @@ class DeviceEngine(private val context: Context,private val models: DeviceModels
                         val bodies=(listOf(system)+messages.map {it.text}).map {it.toByteArray(Charsets.UTF_8)}.toTypedArray()
                         try {
                             result=LlamaNative.generate(handle,roles,bodies,config.localContext,if(parameters.maxTokens>0) parameters.maxTokens else 1024,
-                                if(parameters.temperature>=0) parameters.temperature else .6f,parameters.topP,if(config.localThreads>0) config.localThreads else (Runtime.getRuntime().availableProcessors()-2).coerceIn(1,4),NativeProgress {i,o,f,t ->stats.value=TokenStats(i,o,f,t)})
+                                if(parameters.temperature>=0) parameters.temperature else .6f,parameters.topP,if(config.localThreads>0) config.localThreads else (Runtime.getRuntime().availableProcessors()-2).coerceIn(1,4),config.localCacheK.nativeCode,config.localCacheV.nativeCode,NativeProgress {i,o,f,t ->stats.value=TokenStats(i,o,f,t)})
                             break
                         } catch(e: IllegalStateException) {
                             if(!e.message.orEmpty().startsWith("LUMA_CONTEXT") || messages.size<=1) throw e
@@ -90,6 +90,7 @@ internal fun deviceFailure(code: String): String=when {
     code.startsWith("LUMA_TEMPLATE")->"Шаблон диалога этой модели пока не поддерживается. Выберите instruct-модель Qwen, Llama, Gemma или SmolLM."
     code.startsWith("LUMA_MODEL_TYPE")->"Эта GGUF не подходит для текстового чата. Модели ASR распознают речь; embedding, reranker и проекторы тоже не предназначены для диалога. Выберите текстовую instruct-модель."
     code.startsWith("LUMA_ARCH")->"Архитектура этой GGUF не поддерживается встроенным движком. Qwen3-ASR предназначена для распознавания речи, а не текстового чата. Выберите текстовую instruct-модель."
+    code.startsWith("LUMA_KV_CACHE")->"Эта модель не поддерживает выбранные типы KV-кэша. В «Модели → На телефоне» выберите F16 для K и V или другую комбинацию."
     code.startsWith("LUMA_MEMORY")->"Движку не удалось выделить память. Закройте другие приложения, уменьшите контекст или выберите меньшую модель."
     code.startsWith("LUMA_MODEL")->"Не удалось прочитать GGUF. Файл может быть неполным, повреждённым или несовместимым с этой версией движка. Попробуйте другую текстовую instruct-модель."
     else->"Встроенный движок остановил вычисление. Уменьшите контекст или выберите меньшую модель."

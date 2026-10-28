@@ -1800,5 +1800,11 @@
   "Архитектура этой GGUF не поддерживается встроенным движком. Qwen3-ASR предназначена для распознавания речи, а не текстового чата. Выберите текстовую instruct-модель.": "This GGUF architecture is not supported by the built-in engine. Qwen3-ASR is for speech recognition, not text chat. Choose a text instruct model.",
   "Движку не удалось выделить память. Закройте другие приложения, уменьшите контекст или выберите меньшую модель.": "The engine could not allocate memory. Close other apps, reduce the context or choose a smaller model.",
   "Не удалось прочитать GGUF. Файл может быть неполным, повреждённым или несовместимым с этой версией движка. Попробуйте другую текстовую instruct-модель.": "Could not read the GGUF. The file may be incomplete, damaged or incompatible with this engine version. Try another text instruct model.",
-  "Эта GGUF не подходит для текстового чата. Модели ASR распознают речь; embedding, reranker и проекторы тоже не предназначены для диалога. Выберите текстовую instruct-модель.": "This GGUF is not suitable for text chat. ASR models recognize speech; embedding models, rerankers and projectors are not chat models either. Choose a text instruct model."
+  "Эта GGUF не подходит для текстового чата. Модели ASR распознают речь; embedding, reranker и проекторы тоже не предназначены для диалога. Выберите текстовую instruct-модель.": "This GGUF is not suitable for text chat. ASR models recognize speech; embedding models, rerankers and projectors are not chat models either. Choose a text instruct model.",
+  "KV-кэш: память контекста": "KV cache: context memory",
+  "Сжатие K и V уменьшает расход оперативной памяти. Более сильное сжатие может снизить качество ответа. Файл модели не меняется.": "Compressing K and V reduces RAM usage. Stronger compression may reduce answer quality. The model file stays unchanged.",
+  "Кэш K (-ctk)": "K cache (-ctk)",
+  "Кэш V (-ctv)": "V cache (-ctv)",
+  "F16 — без сжатия. Настройки применятся со следующего ответа и действуют на все GGUF-модели на телефоне.": "F16: uncompressed. Changes apply to the next reply and affect all GGUF models on this phone.",
+  "Эта модель не поддерживает выбранные типы KV-кэша. В «Модели → На телефоне» выберите F16 для K и V или другую комбинацию.": "This model does not support the selected KV cache types. In Models → On device, select F16 for K and V or another combination."
 }

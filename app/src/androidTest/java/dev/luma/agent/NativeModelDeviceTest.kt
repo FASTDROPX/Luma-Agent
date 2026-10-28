@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.luma.agent.core.LlamaNative
 import dev.luma.agent.core.NativeProgress
+import dev.luma.agent.core.KvCacheType
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -44,9 +45,18 @@ class NativeModelDeviceTest {
         val handle=LlamaNative.load(file.path.toByteArray())
         assertTrue(handle!=0L)
         try {
-            val reply=LlamaNative.generate(handle,arrayOf("user".toByteArray()),arrayOf("Hello!".toByteArray()),512,12,0f,.95f,2,NativeProgress {_,_,_,_->})
-            assertTrue(reply.input>0);assertTrue(reply.output>0)
-            assertTrue(reply.text.toString(Charsets.UTF_8).isNotBlank())
+            val pairs=listOf(KvCacheType.F16 to KvCacheType.F16,KvCacheType.Q8_0 to KvCacheType.Q8_0,
+                KvCacheType.Q5_0 to KvCacheType.Q4_0,KvCacheType.IQ4_NL to KvCacheType.Q4_0,KvCacheType.Q5_0 to KvCacheType.IQ4_NL,
+                KvCacheType.Q4_0 to KvCacheType.Q5_0,KvCacheType.IQ4_NL to KvCacheType.IQ4_NL)
+            for((k,v) in pairs) {
+                val reply=LlamaNative.generate(handle,arrayOf("user".toByteArray()),arrayOf("Hello!".toByteArray()),512,12,0f,.95f,2,k.nativeCode,v.nativeCode,NativeProgress {_,_,_,_->})
+                assertTrue("$k/$v: prompt",reply.input>0);assertTrue("$k/$v: output",reply.output>0)
+                assertTrue("$k/$v: text",reply.text.toString(Charsets.UTF_8).isNotBlank())
+            }
+            try {
+                LlamaNative.generate(handle,arrayOf("user".toByteArray()),arrayOf("Hello!".toByteArray()),512,12,0f,.95f,2,99,0,NativeProgress {_,_,_,_->})
+                fail("Invalid JNI cache type accepted")
+            } catch(e: IllegalStateException) {assertEquals("LUMA_KV_CACHE",e.message)}
         } finally {LlamaNative.free(handle)}
     }
 }

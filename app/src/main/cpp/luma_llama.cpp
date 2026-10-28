@@ -26,15 +26,17 @@ static void fail(JNIEnv * e,const std::string & message) { e->ThrowNew(e->FindCl
 static thread_local bool loading=false;
 static thread_local bool unsupported_arch=false;
 static thread_local bool allocation_failed=false;
+static thread_local bool incompatible_cache=false;
 static void native_log(ggml_log_level level,const char * text,void *) {
     if(loading && level==GGML_LOG_LEVEL_ERROR && text) {
         if(std::strstr(text,"unknown model architecture") || std::strstr(text,"unsupported model architecture")) unsupported_arch=true;
+        if(std::strstr(text,"cache type") || std::strstr(text,"quantized V cache") || std::strstr(text,"Flash Attention")) incompatible_cache=true;
         if(std::strstr(text,"failed to allocate") || std::strstr(text,"cannot allocate memory") || std::strstr(text,"bad_alloc")) allocation_failed=true;
     }
     if(text) std::fputs(text,stderr);
 }
 struct LoadDiagnostics {
-    LoadDiagnostics() {unsupported_arch=false;allocation_failed=false;loading=true;}
+    LoadDiagnostics() {unsupported_arch=false;allocation_failed=false;incompatible_cache=false;loading=true;}
     ~LoadDiagnostics() {loading=false;}
 };
 extern "C" JNIEXPORT void JNICALL Java_dev_luma_agent_core_LlamaNative_resetCancel(JNIEnv *,jobject) {cancelled=false;}
@@ -54,7 +56,18 @@ extern "C" JNIEXPORT jlong JNICALL Java_dev_luma_agent_core_LlamaNative_load(JNI
 }
 extern "C" JNIEXPORT void JNICALL Java_dev_luma_agent_core_LlamaNative_free(JNIEnv *,jobject,jlong h) {if(h) llama_model_free(reinterpret_cast<llama_model *>(h));}
 
-extern "C" JNIEXPORT jobject JNICALL Java_dev_luma_agent_core_LlamaNative_generate(JNIEnv * e,jobject,jlong h,jobjectArray role_array,jobjectArray content_array,jint context_size,jint max_output,jfloat temp,jfloat top_p,jint threads,jobject progress) {
+static ggml_type cache_type(int code) {
+    switch(code) {
+        case 0: return GGML_TYPE_F16;
+        case 1: return GGML_TYPE_Q8_0;
+        case 2: return GGML_TYPE_Q5_0;
+        case 3: return GGML_TYPE_Q4_0;
+        case 4: return GGML_TYPE_IQ4_NL;
+        default: throw std::runtime_error("LUMA_KV_CACHE");
+    }
+}
+
+extern "C" JNIEXPORT jobject JNICALL Java_dev_luma_agent_core_LlamaNative_generate(JNIEnv * e,jobject,jlong h,jobjectArray role_array,jobjectArray content_array,jint context_size,jint max_output,jfloat temp,jfloat top_p,jint threads,jint cache_k,jint cache_v,jobject progress) {
     try {
         auto started=std::chrono::steady_clock::now();
         auto elapsed=[&](){return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count();};
@@ -84,8 +97,15 @@ extern "C" JNIEXPORT jobject JNICALL Java_dev_luma_agent_core_LlamaNative_genera
         if(llama_tokenize(vocab,formatted.data(),length,tokens.data(),tokens.size(),true,true)<0) throw std::runtime_error("LUMA_TOKENIZE");
         auto cp=llama_context_default_params();cp.n_ctx=n_ctx;cp.n_batch=128;cp.n_ubatch=128;
         cp.n_threads=threads;cp.n_threads_batch=threads;cp.abort_callback=abort_decode;
-        std::unique_ptr<llama_context,decltype(&llama_free)> ctx(llama_init_from_model(model,cp),llama_free);
-        if(!ctx) throw std::runtime_error("LUMA_MEMORY");
+        cp.type_k=cache_type(cache_k);cp.type_v=cache_type(cache_v);
+        // Quantized V requires Flash Attention, including on the CPU backend.
+        if(ggml_is_quantized(cp.type_v)) cp.flash_attn_type=LLAMA_FLASH_ATTN_TYPE_ENABLED;
+        std::unique_ptr<llama_context,decltype(&llama_free)> ctx(nullptr,llama_free);
+        {
+            LoadDiagnostics diagnostics;
+            ctx.reset(llama_init_from_model(model,cp));
+            if(!ctx) throw std::runtime_error(incompatible_cache ? "LUMA_KV_CACHE" : "LUMA_MEMORY");
+        }
         if(llama_pooling_type(ctx.get())!=LLAMA_POOLING_TYPE_NONE) throw std::runtime_error("LUMA_MODEL_TYPE");
         for(int i=0;i<n;i+=128) {
             if(cancelled) throw std::runtime_error("LUMA_CANCELLED");

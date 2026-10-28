@@ -66,10 +66,32 @@ import kotlinx.coroutines.*
             Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                 listOf(2048,4096,8192,16384).forEach {n ->FilterChip(settings.localContext==n,{graph.update {it.copy(localContext=n)}},enabled=!busy,label={Text(tr("{0}К" ,n/1024))})}
             }
+            Text(tr("KV-кэш: память контекста"),style=MaterialTheme.typography.titleSmall)
+            Text(tr("Сжатие K и V уменьшает расход оперативной памяти. Более сильное сжатие может снизить качество ответа. Файл модели не меняется."),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            KvCachePicker(tr("Кэш K (-ctk)"),settings.localCacheK,!busy,"kv-cache-k") {value->graph.update {it.copy(localCacheK=value)}}
+            KvCachePicker(tr("Кэш V (-ctv)"),settings.localCacheV,!busy,"kv-cache-v") {value->graph.update {it.copy(localCacheV=value)}}
+            Text(tr("F16 — без сжатия. Настройки применятся со следующего ответа и действуют на все GGUF-модели на телефоне."),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Text(tr("Потоки CPU: {0}" ,if(settings.localThreads==0) "авто" else settings.localThreads),style=MaterialTheme.typography.bodyMedium)
             Slider(settings.localThreads.toFloat(),{n->graph.update {it.copy(localThreads=n.toInt())}},enabled=!busy,valueRange=0f..8f,steps=7)
             Text(tr("Большой контекст расходует больше оперативной памяти. Движок работает на CPU. Эта версия поддерживает одиночные текстовые GGUF; файлы mmproj и разделённые модели не запускаются."),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }}
     }
     removing?.let {model ->AlertDialog(onDismissRequest={removing=null},title={Text(tr("Удалить импортированную модель?"))},text={Text(model.name)},confirmButton={TextButton(onClick={removing=null;action {graph.local.unload();graph.deviceModels.remove(model.id)}}) {Text(tr("Удалить"))}},dismissButton={TextButton(onClick={removing=null}) {Text(tr("Отмена"))}})}
+}
+
+@Composable private fun KvCachePicker(label: String,value: KvCacheType,enabled: Boolean,tag: String,onChange: (KvCacheType)->Unit) {
+    var expanded by remember {mutableStateOf(false)}
+    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+        Text(label,Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
+        Box {
+            OutlinedButton(onClick={expanded=true},enabled=enabled,modifier=Modifier.testTag(tag)) {
+                Text(value.id.uppercase());Spacer(Modifier.width(8.dp));Icon(Icons.Outlined.ExpandMore,null,Modifier.size(18.dp))
+            }
+            DropdownMenu(expanded && enabled,onDismissRequest={expanded=false}) {
+                KvCacheType.entries.forEach {type->DropdownMenuItem(text={Text(type.id.uppercase())},
+                    onClick={expanded=false;onChange(type)},modifier=Modifier.testTag("$tag-${type.id}"),
+                    trailingIcon={if(type==value) Icon(Icons.Outlined.Check,null)})}
+            }
+        }
+    }
 }

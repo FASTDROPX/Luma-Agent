@@ -54,6 +54,18 @@ class UiTest {
         compose.onNodeWithText("Открываю контакты").assertIsDisplayed()
         assertTrue(graph.voice.screen.value)
     }
+    @Test fun localCachePickersSaveDifferentKAndVTypes() {
+        compose.setContent {val settings by graph.vault.state.collectAsStateWithLifecycle();LumaTheme(settings) {DeviceModelsScreen(graph)}}
+        compose.onNodeWithTag("device-models").performScrollToNode(hasTestTag("kv-cache-k"))
+        compose.onNodeWithTag("kv-cache-k").performClick()
+        compose.onNodeWithTag("kv-cache-k-q5_0").performClick()
+        compose.waitUntil(5000) {graph.vault.state.value.localCacheK==KvCacheType.Q5_0}
+        compose.onNodeWithTag("device-models").performScrollToNode(hasTestTag("kv-cache-v"))
+        compose.onNodeWithTag("kv-cache-v").performClick()
+        compose.onNodeWithTag("kv-cache-v-iq4_nl").performClick()
+        compose.waitUntil(5000) {graph.vault.state.value.localCacheV==KvCacheType.IQ4_NL}
+        assertEquals(KvCacheType.Q5_0,graph.vault.state.value.localCacheK)
+    }
     @Test fun composerHasTwoModesAndOptionsStayInASheet() {
         runBlocking {graph.vault.update {it.copy(onboarded=true)}}
         compose.setContent {AppRoot(graph)}

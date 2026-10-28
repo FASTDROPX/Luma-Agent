@@ -33,7 +33,7 @@ class PermissionGateTest {
             0 -> Replies.openAiCall("find_contacts", JSONObject().put("query", "Аня"), "c1")
             else -> Replies.openAiText("Нашёл контакты.")
         } }
-        val states = mutableListOf<RunState>()
+        val states = java.util.concurrent.CopyOnWriteArrayList<RunState>()
         val watcher = CoroutineScope(Dispatchers.Unconfined)
         watcher.launch { agent.controller.state.collect { state ->
             states += state
@@ -69,7 +69,7 @@ class PermissionGateTest {
             0 -> Replies.openAiCall("find_contacts", JSONObject().put("query", "А"), "c1")
             else -> Replies.openAiText("Готово.")
         } }
-        val states = mutableListOf<RunState>()
+        val states = java.util.concurrent.CopyOnWriteArrayList<RunState>()
         val watcher = CoroutineScope(Dispatchers.Unconfined)
         watcher.launch { agent.controller.state.collect { states += it } }
         try { agent.run("Контакты"); assertTrue(states.none { it.permission != null }) } finally { watcher.cancel(); agent.close() }

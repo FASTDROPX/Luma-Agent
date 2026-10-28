@@ -29,6 +29,18 @@ class DeviceProviderTest {
         assertEquals(settings.localContext,AppSettings.parse(settings.json()).localContext)
         assertEquals(8192,AppSettings.parse(JSONObject()).localContext)
     }
+    @Test fun cacheTypesPersistIndependentlyAndOldSettingsKeepFullPrecision() {
+        val old=AppSettings.parse(JSONObject().put("localContext",4096))
+        assertEquals(KvCacheType.F16,old.localCacheK);assertEquals(KvCacheType.F16,old.localCacheV)
+        for(k in KvCacheType.entries) for(v in KvCacheType.entries) {
+            val saved=AppSettings.parse(old.copy(localCacheK=k,localCacheV=v).json())
+            assertEquals(k,saved.localCacheK);assertEquals(v,saved.localCacheV);assertEquals(4096,saved.localContext)
+        }
+        val invalid=AppSettings.parse(JSONObject().put("localCacheK","iq5_lm").put("localCacheV","iq4_lm"))
+        assertEquals(KvCacheType.F16,invalid.localCacheK);assertEquals(KvCacheType.F16,invalid.localCacheV)
+        assertTrue(deviceFailure("LUMA_KV_CACHE").contains("F16"))
+        assertFalse(deviceFailure("LUMA_KV_CACHE").contains("выделить память"))
+    }
     @Test fun downloadFailuresExplainActualCause() {
         assertTrue(downloadError(UnknownHostException()).contains("DNS"))
         assertTrue(downloadError(SocketTimeoutException()).contains("вовремя"))
