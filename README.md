@@ -57,7 +57,7 @@
 Новые инструменты, разрешения, альтернативные способы и ограничения Android: [матрица возможностей](docs/ACCESS_TOOLS.md).
 
 Отдельный Android-клиент с чатом и агентом. Kotlin, Jetpack Compose, Material 3.
-Package `dev.luma.agent`, versionCode 18, minSdk 26, target/compileSdk 35.
+Package `dev.luma.agent`, version 1.1, versionCode 27, minSdk 26, target/compileSdk 35.
 Устанавливается отдельно от SimpleCDZ.
 
 ## Интерфейс
